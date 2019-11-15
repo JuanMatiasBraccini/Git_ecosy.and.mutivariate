@@ -36,42 +36,31 @@ library(lme4) #mixed models
 library(MuMIn)  #model selection and pseudoR2 mixed effect models
 library(car)    #to get ANOVA from lmer model
 library(data.table)
+library(tidyverse)
 
 #Define working directory
-
-Folder="Matias"
-#Folder="Agustin"
-
-if(Folder=="Matias") setwd("C:/Matias/Analyses/Ecosystem indices/Shark-bycatch")
-if(Folder=="Agustin") setwd("C:/Users/Agustín/Desktop/Shark-bycatch")
-
-if(Folder=="Matias") User="Matias"
+setwd("C:/Matias/Analyses/Ecosystem indices and multivariate/Shark-bycatch")
+User="Matias"
 
 #Source functions
-source("Git_bycatch_TDGDLF/Ecosystem_functions.R")
+source("C:/Matias/Analyses/Ecosystem indices and multivariate/Git_ecosy.and.mutivariate/Ecosystem_functions.R")
 
 
 #choose if doing .jpeg or .tiff figures
 Do.jpeg="YES"
 Do.tiff="NO"
+source("C:/Matias/Analyses/SOURCE_SCRIPTS/Smart_par.R")
 
-if(User=="Matias")source("C:/Matias/Analyses/SOURCE_SCRIPTS/Smart_par.R")
 
-##################
-###DATA SECTION###
-##################
+# 1 Data section-----------------------------------------------------------------------
 
 # 1. Bring in WA shark observer data
-if(User=="Matias")
-{
-  source("C:/Matias/Analyses/SOURCE_SCRIPTS/Source_Shark_bio.R")
-  rm(DATA)
-  DATA=DATA.ecosystems
-}
+source("C:/Matias/Analyses/SOURCE_SCRIPTS/Git_other/Source_Shark_bio.R")
+rm(DATA)
+DATA=DATA.ecosystems
 
-if(Folder=="Agustin") DATA=read.csv("WA_Agustin.csv",stringsAsFactors=F)
 
-if(Folder=="Matias") setwd("C:/Matias/Analyses/Ecosystem indices/Shark-bycatch")
+setwd("C:/Matias/Analyses/Ecosystem indices and multivariate/Shark-bycatch")
 
 # 2. Bring in MAFFRI shark gillnet data
 #DATA.MAFFRI=read.csv("MAFFRI_data.csv")
@@ -87,8 +76,8 @@ Len.cof=read.csv("Raw coefficents table.csv")
 
 
 #5. Bring in Commercial data
-if(Folder=="Matias") source("C:/Matias/Analyses/Ecosystem indices/Shark-bycatch/Git_bycatch_TDGDLF/Commercial_data_for_Ecosystem_Analysis.R")
-if(Folder=="Agustin") Data.monthly=read.csv("Data.monthly.csv",stringsAsFactors=F)
+source("C:/Matias/Analyses/Ecosystem indices and multivariate/Git_ecosy.and.mutivariate/Commercial_data_for_Ecosystem_Analysis.R")
+
 
 
 #CONTROL
@@ -122,9 +111,10 @@ FactoRS=Expl.varS[-match(c("BOTDEPTH"),Expl.varS)]
 OFFSETT=NA
 #OFFSETT="offset(log.EFFORT)"
 
-##########
-#Functions
-##########
+
+
+# 2 Functions-----------------------------------------------------------------------
+
 
 #Deviance explained
 Dsquared <- function(model, adjust = FALSE)
@@ -1375,10 +1365,7 @@ plot.comm=function(dat.plt,MAIN,Cx,YLIM,Cx.axs)
 }
 
 
-
-#######################
-###PROCEDURE SECTION###
-#######################
+# 3 Precedure section-----------------------------------------------------------------------
 
 #1. Manipulated WA shark observer data
 
@@ -1539,13 +1526,12 @@ DATA$BLOCK=as.character(DATA$BLOCK)
 #Output
 #write.csv(DATA, "DATA.csv", row.names=F)
 
+# 4 Ecosystems indicators analysis-----------------------------------------------------------------------
 
-# 2. Ecosystems indicators analysis
-
-  #--- 2.1 WA Fisheries observer data---
+  #--- 4.1 WA Fisheries observer data---
 
 
-# 2.1.1 Preliminary analyses
+# 4.1.1 Preliminary analyses
 #No of sheet number per year
 surveys=data.frame(YEAR=as.factor(""), SURVEYS=as.numeric(0))#dummy
 for(i in unique(DATA$YEAR))
@@ -1682,10 +1668,9 @@ OUT.sens.2=fn.loop.over.obsrvr.data(DaTA=DATA.sens.2,dat.nm="S2",normalised="YES
 setwd(WD)
 
 
-  # 2.2 WA Fisheries commercial data
+  # 4.2 WA Fisheries commercial data
 
-# 2.2.1 Preliminary analyses
-
+# 4.2.1 Preliminary analyses
 if(do.exploratory=="YES")
 {
   #No of shots per year-block-month
@@ -1854,7 +1839,9 @@ if(Separate.monthly_daily=="YES")
 
 
 
-#glm approach               #takes 11 seconds
+# 5 glm approach-------------------------------------------------------------------------
+#takes 11 seconds
+               
 if(Separate.monthly_daily=="NO")
 {
   system.time(for(i in 1:n.rv)
@@ -1913,8 +1900,7 @@ if(Separate.monthly_daily=="YES")
   }) 
 }
 
-
-#data mining
+# 6 data mining-------------------------------------------------------------------------
 # system.time(for(i in 1:n.rv)Store.mod.out.commercial[[i]]=Mod.fn.mining(d=DATA.shots.diversity.commercial,
 #             ResVar=resp.vars[i],Predictrs=Predictors,Y.type="Continuous",Prop.train=.7,ALL.models="NO",nboot=1))
 
@@ -1989,11 +1975,11 @@ mtext("Year",1,outer=T,cex=1.5,line=1.5)
 mtext("Relative value",2,-.6,outer=T,cex=1.5,las=3)
 dev.off()
 
+#ACA
+# 7 Multivariate analysis-----------------------------------------------------------------------
+source("C:/Matias/Analyses/SOURCE_SCRIPTS/Git_other/Multivariate_statistics.R")
 
-
-# 3. Multivariate analysis          #ACA
-source("C:/Matias/Analyses/SOURCE_SCRIPTS/Multivariate_statistics.R")
-  #3.1  Logbook
+  #7.1  Logbook
 DataSets=c("proportion")   #response variables
 Predictors=c("YEAR","BLOCK","BOAT","MONTH","BOTDEPTH")
 IDVAR=Predictors
@@ -2017,7 +2003,7 @@ STore.multi.var.observer=Multivar.fn(DATA=Numbers.block.year.mn.vesl,ResVar=ResV
                                    Predictors=Predictors,IDVAR=IDVAR,
                                    Formula=formula("d.res.var~."),DataSets=DataSets)
 
-Hndl="C:/Matias/Analyses/Ecosystem indices/Shark-bycatch/Outputs/Multivariate"
+Hndl="C:/Matias/Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate"
 for(s in 1:length(STore.multi.var.observer)) 
 {
   with(STore.multi.var.observer[[s]],
@@ -2030,7 +2016,7 @@ for(s in 1:length(STore.multi.var.observer))
        })
 }
 
-  #3.2 Commercial
+  #7.2 Commercial
 Predictors=c("YEAR","BLOCK","BOAT","MONTH")
 IDVAR=Predictors
 Prop.sp=table(d.anlsys$SPECIES)
@@ -2068,892 +2054,3 @@ for(s in 1:length(STore.multi.var.observer))
                              hndl=paste(Hndl,"Commercial/",sep="/"),cexMDS=.75)
        })
 }
-
-
-
-
-
-#NOTE USED
-# if(Folder=="Agustin")
-# {
-#   #Communities diversity throughout years
-#   years=table(DATA1$YEAR,DATA1$SPECIES)
-#   Div.InDX.yrs=Div.ind(data=years)
-#   par(mfcol=c(2,2))
-#   with(Div.InDX.yrs,{
-#     fun.plt.Indx(Var_names,Shannon,"Shannon-Wiener diversity index","YEAR",Var_names,c(1, max(Shannon) + 0.5))
-#     fun.plt.Indx(Var_names,Pielou,"Pielou's evenness","YEAR",Var_names,c(0.2, max(Pielou) + 0.2))
-#     fun.plt.Indx(Var_names,Simpson,"Simpson's index","YEAR",Var_names,c(0.45, max(Simpson) + 0.2))
-#     fun.plt.Indx(Var_names,Margalef,"Margalef species richness","YEAR",Var_names,c(9, max(Margalef) + 1))  
-#   })
-#   
-#   #########################################
-#   #Communities diversity throughout regions
-#   regions=table(DATA1$REGION,DATA1$SPECIES)
-#   Div.InDX.reg=Div.ind(data=regions)
-#   par(mfcol=c(2,2))
-#   with(Div.InDX.reg,{
-#     fun.plt.Indx(1:length(Var_names),Shannon,"Shannon-Wiener diversity index","REGION",Var_names,c(1, max(Shannon) + 1))
-#     fun.plt.Indx(1:length(Var_names),Pielou,"Pielou's evenness","REGION",Var_names,c(0, max(Pielou) + 0.3))
-#     fun.plt.Indx(1:length(Var_names),Simpson,"Simpson's index","REGION",Var_names,c(0.3, max(Simpson) + 0.3))
-#     fun.plt.Indx(1:length(Var_names),Margalef,"Margalef species richness","REGION",Var_names,c(8, max(Margalef) + 1.2))  
-#   })
-#   
-#   #######################################
-#   #Communities diversity throughout zones
-#   zones=table(DATA1$ZONE,DATA1$SPECIES)
-#   Div.InDX.zone=Div.ind(data=zones)
-#   par(mfcol=c(2,2))
-#   with(Div.InDX.zone,{
-#     fun.plt.Indx(1:length(Var_names),Shannon,"Shannon-Wiener diversity index","ZONE",Var_names,c(1, max(Shannon) + 1))
-#     fun.plt.Indx(1:length(Var_names),Pielou,"Pielou's evenness","ZONE",Var_names,c(0, max(Pielou) + 0.3))
-#     fun.plt.Indx(1:length(Var_names),Simpson,"Simpson's index","ZONE",Var_names,c(0.4, max(Simpson) + 0.3))
-#     fun.plt.Indx(1:length(Var_names),Margalef,"Margalef species richness","ZONE",Var_names,c(8, max(Margalef) + 1.5))  
-#   })
-#   
-#   ########################################
-#   #Communities diversity throughout blocks
-#   blocks=table(DATA1$BLOCK,DATA1$SPECIES)
-#   Div.InDX.blo=Div.ind(data=blocks)
-#   par(mfcol=c(2,2))
-#   with(Div.InDX.blo,{
-#     fun.plt.Indx(1:length(Var_names),Shannon,"Shannon-Wiener diversity index","BLOCK",Var_names,c(0, max(Shannon, na.rm=T) + 1))
-#     fun.plt.Indx(1:length(Var_names),Pielou,"Pielou's evenness","BLOCK",Var_names,c(0, max(Pielou, na.rm=T) + 0.2))
-#     fun.plt.Indx(1:length(Var_names),Simpson,"Simpson's index","BLOCK",Var_names,c(0, max(Simpson) + 0.2))
-#     fun.plt.Indx(1:length(Var_names),Margalef,"Margalef species richness","BLOCK",Var_names,c(0, max(Margalef, na.rm=T) + 4))  
-#   })
-#   
-#   ############################################################################
-#   #Communities diversity throughout years and regions (space-time interaction)
-#   interac_list=vector(mode="list")                         #empty list of length zero
-#   for(i in sort(unique(DATA1$REGION)))
-#   {
-#     subset_region=subset(DATA1,REGION==i)
-#     years=table(subset_region$YEAR,subset_region$SPECIES)
-#     Div.InDX.interac=Div.ind(data=years)
-#     interac_list[[i]]=Div.InDX.interac                    #list of lists with the indeces of the communities per year for each region
-#   }
-#   
-#   par(mfcol=c(2,2), xpd=T)
-#   years_range=range(as.numeric(as.character(DATA1$YEAR)))  #for XLIM
-#   
-#   #Shannon
-#   index_range=max(c(interac_list[[1]][[1]],interac_list[[2]][[1]],interac_list[[3]][[1]],interac_list[[4]][[1]],interac_list[[5]][[1]],interac_list[[6]][[1]]),na.rm=T)                        #for YLIM   
-#   with(interac_list[[1]],{                                 #plot the first Region
-#     fun.plt.Indx(Var_names,Shannon,"Shannon-Wiener diversity index","YEAR",Var_names,c(0.5,index_range + 0.5),years_range)
-#   })
-#   for(i in 2:length(interac_list))                         #Adding the other regions points to the existing plot
-#   {
-#     with(interac_list[[i]],{
-#       points(Var_names, Shannon, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = i)
-#     })
-#   }
-#   
-#   #Pielou
-#   index_range=max(c(interac_list[[1]][[3]],interac_list[[2]][[3]],interac_list[[3]][[3]],interac_list[[4]][[3]],interac_list[[5]][[3]],interac_list[[6]][[3]]),na.rm=T)                
-#   with(interac_list[[1]],{                                 
-#     fun.plt.Indx(Var_names,Pielou,"Pielou's evenness","YEAR",Var_names,c(0,index_range + 0.3),years_range)
-#   })
-#   for(i in 2:length(interac_list))                         
-#   {
-#     with(interac_list[[i]],{
-#       points(Var_names, Pielou, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = i)
-#     })
-#   }
-#   
-#   #Simpson
-#   index_range=max(c(interac_list[[1]][[4]],interac_list[[2]][[4]],interac_list[[3]][[4]],interac_list[[4]][[4]],interac_list[[5]][[4]],interac_list[[6]][[4]]),na.rm=T)               
-#   with(interac_list[[1]],{                                 
-#     fun.plt.Indx(Var_names,Simpson,"Simpson's index","YEAR",Var_names,c(0.2,index_range + 0.2),years_range)
-#   })
-#   for(i in 2:length(interac_list))                        
-#   {
-#     with(interac_list[[i]],{
-#       points(Var_names, Simpson, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = i)
-#     })
-#   }
-#   
-#   #Margalef
-#   index_range=max(c(interac_list[[1]][[2]],interac_list[[2]][[2]],interac_list[[3]][[2]],interac_list[[4]][[2]],interac_list[[5]][[2]],interac_list[[6]][[2]]),na.rm=T)            
-#   with(interac_list[[1]],{                                
-#     fun.plt.Indx(Var_names,Margalef,"Margalef species richness","YEAR",Var_names,c(8,index_range + 4),years_range)
-#   })
-#   for(i in 2:length(interac_list))                       
-#   {
-#     with(interac_list[[i]],{
-#       points(Var_names, Margalef, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = i)
-#     })
-#   }
-#   
-#   mtext(names(interac_list), side=3, line=2.5, at=c(1992,1996,2000,2004,2008,2012), cex=1)          #points references
-#   points(c(1990.5,1994.5,1998.5,2002.5,2006.5,2010.5), rep(39,6), pch=rep(20, 6), col=1:6, cex=3)
-#   
-#   ##############################################################################
-#   #Communities diversity throughout years and bioregions (space-time interaction)
-#   interac_list=vector(mode="list")                         #empty list of length zero
-#   for(i in sort(unique(DATA1$BIOREGION)))
-#   {
-#     subset_bioregion=subset(DATA1,BIOREGION==i)
-#     years=table(subset_bioregion$YEAR,subset_bioregion$SPECIES)
-#     Div.InDX.interac2=Div.ind(data=years)
-#     interac_list[[i]]=Div.InDX.interac2                   #list of lists with the indeces of the communities per year for each bioregion
-#   }
-#   
-#   par(mfcol=c(2,2), xpd=T)
-#   years_range=range(as.numeric(as.character(DATA1$YEAR)))  #for XLIM
-#   
-#   #Shannon
-#   index_range=max(c(interac_list[[1]][[1]],interac_list[[2]][[1]]),na.rm=T)                        #for YLIM   
-#   with(interac_list[[1]],{                                 #plot the first bioregion
-#     fun.plt.Indx(Var_names,Shannon,"Shannon-Wiener diversity index","YEAR",Var_names,c(1,index_range + 0.2),years_range)
-#   })
-#   with(interac_list[[2]],{                                 #plot the second bioregion
-#     points(Var_names, Shannon, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = 2)
-#   })
-#   
-#   #Pielou
-#   index_range=max(c(interac_list[[1]][[3]],interac_list[[2]][[3]]),na.rm=T)                
-#   with(interac_list[[1]],{                                 
-#     fun.plt.Indx(Var_names,Pielou,"Pielou's evenness","YEAR",Var_names,c(0,index_range + 0.3),years_range)
-#   })
-#   with(interac_list[[2]],{
-#     points(Var_names, Pielou, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = 2)
-#   })
-#   
-#   #Simpson
-#   index_range=max(c(interac_list[[1]][[4]],interac_list[[2]][[4]]),na.rm=T)               
-#   with(interac_list[[1]],{                                 
-#     fun.plt.Indx(Var_names,Simpson,"Simpson's index","YEAR",Var_names,c(0.3,index_range + 0.2),years_range)
-#   })
-#   with(interac_list[[2]],{
-#     points(Var_names, Simpson, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = 2)
-#   })
-#   
-#   #Margalef
-#   index_range=max(c(interac_list[[1]][[2]],interac_list[[2]][[2]]),na.rm=T)            
-#   with(interac_list[[1]],{                                
-#     fun.plt.Indx(Var_names,Margalef,"Margalef species richness","YEAR",Var_names,c(8,index_range + 4),years_range)
-#   })
-#   with(interac_list[[2]],{
-#     points(Var_names, Margalef, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = 2)
-#   })
-#   
-#   mtext(names(interac_list), side=3, line=2.5, at=c(1997,2007), cex=1)          #points references
-#   points(c(1995,2005), rep(28.3,2), pch=rep(20, 6), col=1:2, cex=3)
-#   
-#   
-#   ############################
-#   #Ecosystem-based indicators#
-#   ############################
-#   
-#   #Check shots with few records
-#   A=sort(table(DATA$SHEET_NO))
-#   a=subset(A,A<2)
-#   StoReE=vector('list',length(a))
-#   names(StoReE)=a
-#   for(p in 1:length(a)) StoReE[[p]]=with(subset(DATA,SHEET_NO==names(a)[p]),table(as.character(COMMON_NAME)))
-#   
-#   
-#   DATA2=subset(DATA,NATURE!="TEPS" & REGION!="Out.of.region",select=c("SHEET_NO","YEAR","BLOCK","SPECIES","TL","FL","TROPHIC_LEVEL","ZONE","REGION","BIOREGION"))  #not using TEPS and out of region data
-#   DATA2$YEAR=as.factor(DATA2$YEAR)
-#   DATA2$SPECIES=as.factor(DATA2$SPECIES)
-#   
-#   t_level=aggregate(TROPHIC_LEVEL ~ SPECIES, FUN=mean, data=DATA2) #trophic level by species table
-#   dummy0=NULL
-#   species=for(i in levels(DATA2$SPECIES)){dummy0=c(dummy0,rep(i,17))} #17 times each species
-#   
-#   ################################################################################
-#   #Ecosystem-based indicators throughout years and regions (space-time interaction)
-#   
-#   N.boots=5
-#   Reg.temp=1:4
-#   ECO.I.R=vector('list',length(Reg.temp))
-#   names(ECO.I.R)=Reg.temp
-#   Yr.list=ECO.I.R
-#   for(r in 1:length(Reg.temp))
-#   {
-#     D.boot=Boot.eco.indx(Boot.what="MIN",D=subset(DATA2,Reg.Temp==Reg.temp[r]))
-#     Eco.InDX=vector('list',N.boots)                            
-#     for(n in 1:N.boots)
-#     {
-#       d=lapply(X = D.boot, FUN = `[[`, as.character(n))
-#       subset_region=do.call(rbind,d)
-#       subset_region$SPECIES=as.character(subset_region$SPECIES)
-#       years=table(subset_region$YEAR,subset_region$SPECIES)         #table of the number of individuals for all species and years
-#       fl_max=aggregate(FL~YEAR+SPECIES,FUN=max,data=subset_region) #maximum length of all species and years   
-#       fl_max_table=acast(fl_max,YEAR~SPECIES,value.var="FL")              
-#       
-#       Eco.InDX[[n]]=Eco.ind(data=years,t_level,fl_max_table)
-#     }
-#     Yr.list[[r]]=sort(as.numeric(names(D.boot)))  
-#     MTL=do.call(rbind,lapply(X = Eco.InDX, FUN = `[[`, "MTL"))
-#     MML=do.call(rbind,lapply(X = Eco.InDX, FUN = `[[`, "MML"))
-#     FIB=do.call(rbind,lapply(X = Eco.InDX, FUN = `[[`, "FIB"))  
-#     ECO.I.R[[r]]=list(MTL=MTL,MML=MML,FIB=FIB)                        
-#   }
-#   
-#   
-#   #Plot indices
-#   STATS=ECO.I.R
-#   for(r in 1:length(Reg.temp))
-#   {
-#     STATS[[r]]$MTL=Stats(Yr=Yr.list[[r]],DD=ECO.I.R[[r]]$MTL,lw=0.025,up=0.975)
-#     STATS[[r]]$MML=Stats(Yr=Yr.list[[r]],DD=ECO.I.R[[r]]$MML,lw=0.025,up=0.975)
-#     STATS[[r]]$FIB=Stats(Yr=Yr.list[[r]],DD=ECO.I.R[[r]]$FIB,lw=0.025,up=0.975)
-#   }
-#   
-#   YEARS=as.numeric(as.character(sort(unique(DATA2$YEAR))))
-#   
-#   
-#   fn.plt(d=STATS$MTL) 
-#   
-#   # dummy=data.frame(YEAR=rep(levels(DATA2$YEAR),99),BLOCK=NA,SPECIES=dummy0,TL=NA,FL=NA,TROPHIC_LEVEL=NA,ZONE=NA,REGION=NA,BIOREGION=NA)#data.frame whit the combination of all species and years                          
-#   # dummy[is.na(dummy)]=0
-#   # interac_list2=vector(mode="list")                                #empty list of length zero
-#   # for(i in sort(unique(DATA2$REGION)))
-#   #    {
-#   #    subset_region=subset(DATA2,REGION==i)                   
-#   #    years=table(subset_region$YEAR,subset_region$SPECIES)         #table of the number of individuals for all species and years
-#   #    subset_region2=rbind(subset_region,dummy)
-#   #    fl_max=aggregate(FL~YEAR+SPECIES,FUN=max,data=subset_region2) #maximum length of all species and years   
-#   #    fl_max_table=acast(fl_max,YEAR~SPECIES,value.var="FL")              
-#   #    Eco.InDX.interac=Eco.ind(data=years,t_level,fl_max_table)
-#   #    interac_list2[[i]]=Eco.InDX.interac                           #list of lists with the indeces of the communities per year for each region
-#   #    }
-#   
-#   par(mfcol=c(2,2), xpd=T)
-#   years_range=range(as.numeric(as.character(DATA2$YEAR)))  #for XLIM
-#   
-#   #Mean Trophic Level
-#   index_range=max(c(interac_list2[[1]][[1]],interac_list2[[2]][[1]],interac_list2[[3]][[1]],interac_list2[[4]][[1]],interac_list2[[5]][[1]],interac_list2[[6]][[1]]),na.rm=T)                       #for YLIM   
-#   with(interac_list2[[1]],{                                #plot the first Region
-#     fun.plt.Indx(Var_names,Mean_trophic_level,"Mean Trophic Level","YEAR",Var_names,c(3.5,index_range + 0.2),years_range)
-#   })
-#   for(i in 2:length(interac_list2))                        #Adding the other regions points to the existing plot
-#   {
-#     with(interac_list2[[i]],{                             
-#       points(Var_names, Mean_trophic_level, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = i)
-#     })
-#   }
-#   
-#   #Mean Maximum Length
-#   index_range=max(c(interac_list2[[1]][[2]],interac_list2[[2]][[2]],interac_list2[[3]][[2]],interac_list2[[4]][[2]],interac_list2[[5]][[2]],interac_list2[[6]][[2]]),na.rm=T)                       #for YLIM   
-#   with(interac_list2[[1]],{                                #plot the first Region
-#     fun.plt.Indx(Var_names,Max_length,"Mean Maximum Length","YEAR",Var_names,c(20,index_range + 20),years_range)
-#   })
-#   for(i in 2:length(interac_list2))                        #Adding the other regions points to the existing plot
-#   {
-#     with(interac_list2[[i]],{
-#       points(Var_names, Max_length, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = i)
-#     })
-#   }
-#   
-#   #Fishery in Balance
-#   index_range=range(c(interac_list2[[1]][[3]],interac_list2[[2]][[3]],interac_list2[[3]][[3]],interac_list2[[4]][[3]],interac_list2[[5]][[3]],interac_list2[[6]][[3]]),na.rm=T)                       #for YLIM   
-#   with(interac_list2[[1]],{                                #plot the first Region
-#     fun.plt.Indx(Var_names,FIB,"Fishery in Balance","YEAR",Var_names,c(index_range[1] - 1,index_range[2] + 1),years_range)
-#   })
-#   for(i in 2:length(interac_list2))                        #Adding the other regions points to the existing plot
-#   {
-#     with(interac_list2[[i]],{
-#       points(Var_names, FIB, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = i)
-#     })
-#   }
-#   
-#   mtext(names(interac_list2), side=1, line=4.25, at=c(1992,1996,2000,2004,2008,2012), cex=1)          #points references
-#   points(c(1990.5,1994.5,1998.5,2002.5,2006.5,2010.5), rep(-9.75,6), pch=rep(20, 6), col=1:6, cex=3)
-#   
-#   ###################################################################################
-#   #Ecosystem-based indicators throughout years and bioregions (space-time interaction)
-#   dummy=data.frame(YEAR=rep(levels(DATA2$YEAR),99),BLOCK=NA,SPECIES=dummy0,TL=NA,FL=NA,TROPHIC_LEVEL=NA,ZONE=NA,REGION=NA,BIOREGION=NA)#data.frame whit the combination of all species and years
-#   dummy[is.na(dummy)]=0
-#   interac_list2=vector(mode="list")                                #empty list of length zero
-#   for(i in sort(unique(DATA2$BIOREGION)))
-#   {
-#     subset_bioregion=subset(DATA2,BIOREGION==i)
-#     years=table(subset_bioregion$YEAR,subset_bioregion$SPECIES)   #table of the number of individuals for all species and years
-#     subset_bioregion2=rbind(subset_bioregion,dummy)
-#     fl_max=aggregate(FL~YEAR+SPECIES,FUN=max,data=subset_bioregion2)#maximum length of all species and years
-#     fl_max_table=acast(fl_max,YEAR~SPECIES,value.var="FL")
-#     Eco.InDX.interac2=Eco.ind(data=years,t_level,fl_max_table)
-#     interac_list2[[i]]=Eco.InDX.interac2                          #list of lists with the indeces of the communities per year for each bioregion
-#   }
-#   
-#   par(mfcol=c(2,2), xpd=T)
-#   years_range=range(as.numeric(as.character(DATA2$YEAR)))  #for XLIM
-#   
-#   #Mean Trophic Level
-#   index_range=max(c(interac_list2[[1]][[1]],interac_list2[[2]][[1]]),na.rm=T)                       #for YLIM
-#   with(interac_list2[[1]],{                                #plot the first bioregion
-#     fun.plt.Indx(Var_names,Mean_trophic_level,"Mean Trophic Level","YEAR",Var_names,c(3.5,index_range + 0.2),years_range)
-#   })
-#   with(interac_list2[[2]],{                             #plot the second bioregion
-#     points(Var_names, Mean_trophic_level, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = 2)
-#   })
-#   
-#   #Mean Maximum Length
-#   index_range=max(c(interac_list2[[1]][[2]],interac_list2[[2]][[2]]),na.rm=T)                       #for YLIM
-#   with(interac_list2[[1]],{                                #plot the first Region
-#     fun.plt.Indx(Var_names,Max_length,"Mean Maximum Length","YEAR",Var_names,c(20,index_range + 20),years_range)
-#   })
-#   with(interac_list2[[2]],{
-#     points(Var_names, Max_length, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = 2)
-#   })
-#   
-#   #Fishery in Balance
-#   index_range=range(c(interac_list2[[1]][[3]],interac_list2[[2]][[3]]),na.rm=T)                       #for YLIM
-#   with(interac_list2[[1]],{                                #plot the first Region
-#     fun.plt.Indx(Var_names,FIB,"Fishery in Balance","YEAR",Var_names,c(index_range[1] - 1,index_range[2] + 1),years_range)
-#   })
-#   with(interac_list2[[2]],{
-#     points(Var_names, FIB, type = "o", pch = 20, cex = 2, lwd = 1.5, lty = 2, col = 2)
-#   })
-#   
-#   mtext(names(interac_list2), side=1, line=4.5, at=c(1997,2007), cex=1)          #points references
-#   points(c(1995,2005), rep(-4,2), pch=rep(20, 2), col=1:2, cex=3)
-#   
-#   
-#   
-#   #######
-#   #INEXT#
-#   #######
-#   
-#   ####################
-#   #by-Year assamblages
-#   DATA3=subset(DATA,NATURE!="TEPS" & REGION!="Out.of.region")
-#   sample_vector=NULL
-#   for(i in sort(unique(DATA3$YEAR)))                           #calculates number of surveys per region
-#   {
-#     sub_year=subset(DATA3,YEAR==i)
-#     sample_number=length(unique(sub_year$SHEET_NO))
-#     sample_vector=c(sample_vector,sample_number)  
-#   }                                                            
-#   freq_list=list("1993"=NULL,"1994"=NULL,"1995"=NULL,"1996"=NULL,"1997"=NULL,"1998"=NULL,"1999"=NULL,"2000"=NULL,"2001"=NULL,"2002"=NULL,"2003"=NULL,"2004"=NULL,"2005"=NULL,"2006"=NULL,"2007"=NULL,"2012"=NULL,"2013"=NULL)
-#   for(i in sort(unique(DATA3$YEAR)))                          #calculates the list of species frequencies per region
-#   {
-#     sub_year=subset(DATA3,YEAR==i)  
-#     sp_matrix=table(sub_year$SHEET_NO,sub_year$SPECIES)
-#     sp_matrix=ifelse(sp_matrix>0,1,0)
-#     freq_vector=NULL
-#     for(j in colnames(sp_matrix))
-#     {
-#       freq_value=sum(sp_matrix[,j])
-#       freq_vector=c(freq_vector,freq_value)
-#     }
-#     freq_list[[i]]=sort(freq_vector,decreasing=T)
-#   }
-#   for(i in 1:length(freq_list))                                 #introduce the number of surveys before the frequencies in each vector
-#   {
-#     freq_list[[i]]=c(sample_vector[i],freq_list[[i]]) 
-#   }
-#   
-#   year_iNEXT=iNEXT(freq_list, q=c(0,1,2), datatype="incidence_freq", size=seq(1,500,20))
-#   ggiNEXT(year_iNEXT, type=1, facet.var="site")
-#   
-#   ###################### 
-#   #by-Region assamblages
-#   sample_vector=NULL
-#   for(i in sort(unique(DATA3$REGION)))                           #calculates number of surveys per region
-#   {
-#     sub_region=subset(DATA3,REGION==i)
-#     sample_number=length(unique(sub_region$SHEET_NO))
-#     sample_vector=c(sample_vector,sample_number)  
-#   }                                                            
-#   freq_list=list(Region1=NULL,Region2=NULL,Region3=NULL,Region4=NULL,Region5=NULL,Region6=NULL)
-#   for(i in sort(unique(DATA3$REGION)))                          #calculates the list of species frequencies per region
-#   {
-#     sub_region=subset(DATA3,REGION==i)  
-#     sp_matrix=table(sub_region$SHEET_NO,sub_region$SPECIES)
-#     sp_matrix=ifelse(sp_matrix>0,1,0)
-#     freq_vector=NULL
-#     for(j in colnames(sp_matrix))
-#     {
-#       freq_value=sum(sp_matrix[,j])
-#       freq_vector=c(freq_vector,freq_value)
-#     }
-#     freq_list[[i]]=sort(freq_vector,decreasing=T)
-#   }
-#   for(i in 1:length(freq_list))                                 #introduce the number of surveys before the frequencies in each vector
-#   {
-#     freq_list[[i]]=c(sample_vector[i],freq_list[[i]]) 
-#   }
-#   
-#   region_iNEXT=iNEXT(freq_list, q=c(0,1,2), datatype="incidence_freq", size=seq(1,1200,20))
-#   ggiNEXT(region_iNEXT, type=1, facet.var="site")
-#   
-#   ########################
-#   #by-Bioegion assamblages
-#   sample_vector=NULL
-#   for(i in sort(unique(DATA3$BIOREGION)))                           #calculates number of surveys per region
-#   {
-#     sub_bioregion=subset(DATA3,BIOREGION==i)
-#     sample_number=length(unique(sub_bioregion$SHEET_NO))
-#     sample_vector=c(sample_vector,sample_number)  
-#   }                                                            
-#   freq_list=list(SouthCoast=NULL,WestCoast=NULL)
-#   for(i in sort(unique(DATA3$BIOREGION)))                          #calculates the list of species frequencies per region
-#   {
-#     sub_bioregion=subset(DATA3,BIOREGION==i)  
-#     sp_matrix=table(sub_bioregion$SHEET_NO,sub_bioregion$SPECIES)
-#     sp_matrix=ifelse(sp_matrix>0,1,0)
-#     freq_vector=NULL
-#     for(j in colnames(sp_matrix))
-#     {
-#       freq_value=sum(sp_matrix[,j])
-#       freq_vector=c(freq_vector,freq_value)
-#     }
-#     freq_list[[i]]=sort(freq_vector,decreasing=T)
-#   }
-#   for(i in 1:length(freq_list))                                 #introduce the number of surveys before the frequencies in each vector
-#   {
-#     freq_list[[i]]=c(sample_vector[i],freq_list[[i]]) 
-#   }
-#   
-#   bioregion_iNEXT=iNEXT(freq_list, q=c(0,1,2), datatype="incidence_freq", size=seq(1,2100,100))
-#   ggiNEXT(bioregion_iNEXT, type=1, facet.var="site")
-#   
-#   ##############################
-#   #by-Year-and-Bioregion assamblages
-#   #West Coast Bioregion
-#   DATA4=subset(DATA3,BIOREGION=="WestCoast")
-#   sample_vector=NULL
-#   for(i in sort(unique(DATA4$YEAR)))                           #calculates number of surveys per region
-#   {
-#     sub_year=subset(DATA4,YEAR==i)
-#     sample_number=length(unique(sub_year$SHEET_NO))
-#     sample_vector=c(sample_vector,sample_number)  
-#   }                                                            
-#   freq_list=list("1993"=NULL,"1994"=NULL,"1995"=NULL,"1996"=NULL,"1997"=NULL,"1998"=NULL,"1999"=NULL,"2000"=NULL,"2001"=NULL,"2002"=NULL,"2003"=NULL,"2004"=NULL,"2005"=NULL,"2006"=NULL,"2007"=NULL,"2012"=NULL,"2013"=NULL)
-#   for(i in sort(unique(DATA4$YEAR)))                          #calculates the list of species frequencies per region
-#   {
-#     sub_year=subset(DATA4,YEAR==i)  
-#     sp_matrix=table(sub_year$SHEET_NO,sub_year$SPECIES)
-#     sp_matrix=ifelse(sp_matrix>0,1,0)
-#     freq_vector=NULL
-#     for(j in colnames(sp_matrix))
-#     {
-#       freq_value=sum(sp_matrix[,j])
-#       freq_vector=c(freq_vector,freq_value)
-#     }
-#     freq_list[[i]]=sort(freq_vector,decreasing=T)
-#   }
-#   for(i in 1:length(freq_list))                                 #introduce the number of surveys before the frequencies in each vector
-#   {
-#     freq_list[[i]]=c(sample_vector[i],freq_list[[i]]) 
-#   }
-#   
-#   w.coast_iNEXT=iNEXT(freq_list, q=c(0,1,2), datatype="incidence_freq", size=seq(1,280,12))
-#   ggiNEXT(w.coast_iNEXT, type=1, facet.var="site")
-#   
-#   ###################### 
-#   #South Coast Bioregion
-#   DATA5=subset(DATA3,BIOREGION=="SouthCoast")
-#   sample_vector=NULL
-#   for(i in sort(unique(DATA5$YEAR)))                           #calculates number of surveys per region
-#   {
-#     sub_year=subset(DATA5,YEAR==i)
-#     sample_number=length(unique(sub_year$SHEET_NO))
-#     sample_vector=c(sample_vector,sample_number)  
-#   } 
-#   freq_list=list("1993"=NULL,"1994"=NULL,"1995"=NULL,"1996"=NULL,"1997"=NULL,"1998"=NULL,"1999"=NULL,"2012"=NULL,"2013"=NULL)
-#   for(i in sort(unique(DATA5$YEAR)))                          #calculates the list of species frequencies per region
-#   {
-#     sub_year=subset(DATA5,YEAR==i)  
-#     sp_matrix=table(sub_year$SHEET_NO,sub_year$SPECIES)
-#     sp_matrix=ifelse(sp_matrix>0,1,0)
-#     freq_vector=NULL
-#     for(j in colnames(sp_matrix))
-#     {
-#       freq_value=sum(sp_matrix[,j])
-#       freq_vector=c(freq_vector,freq_value)
-#     }
-#     freq_list[[i]]=sort(freq_vector,decreasing=T)
-#   }
-#   for(i in 1:length(freq_list))                                 #introduce the number of surveys before the frequencies in each vector
-#   {
-#     freq_list[[i]]=c(sample_vector[i],freq_list[[i]]) 
-#   }
-#   
-#   s.coast_iNEXT=iNEXT(freq_list, q=c(0,1,2), datatype="incidence_freq", size=seq(1,250,10))
-#   ggiNEXT(s.coast_iNEXT, type=1, facet.var="site")
-#   
-#   
-#   ######################################
-#   #nMDS analysis of species composition#
-#   ######################################
-#   
-#   DATA6=subset(DATA,NATURE!="TEPS" & REGION!="Out.of.region" & !is.na(EFFORT))#not using TEPS, out of region and no effort data
-#   
-#   ############
-#   #All species
-#   all_sp=aggregate(INDIVIDUALS~SHEET_NO+SPECIES+YEAR+REGION+BIOREGION+ZONE+EFFORT,FUN=sum,data=DATA6)#Individuals per sheet number and species
-#   all_sp$CPUE=all_sp$INDIVIDUALS/all_sp$EFFORT         #CPUE calculation
-#   all_sp$SPECIES=as.factor(all_sp$SPECIES)
-#   
-#   #YEARS
-#   years=aggregate(CPUE~YEAR+SPECIES,all_sp,mean)                #aggregate the CPUE by YEAR and SPECIES
-#   years1=acast(years,YEAR~SPECIES,value.var="CPUE")             #reshape de data frame into matrix-like for the metaMDS function
-#   years1[is.na(years1)]=0                                       #replace NA with 0 values as it means no capture 
-#   NMDS1=metaMDS(years1,wascores=T)                              #nMDS
-#   plot(NMDS1,type="t",main=paste("nMDS-Bray, stress=",round(NMDS1$stress,3)))#nMDS biplot of a Bray–Curtis dissimilarity matrix of the species CPUE
-#   
-#   par(mfrow=c(1,2))
-#   stressplot(NMDS1,main="Sheppard plot")                        #Sheppard plot shows the appropriateness of the nMDS + linear and non-linear fit
-#   g.o.f=goodness(NMDS1)                                         #goodness of fit
-#   plot(NMDS1,type="t",main="Goodness of fit")                   #nMDS biplot + goodness of fit
-#   points(NMDS1,cex=g.o.f*200)                                   #poorly fitted years have larger bubbles
-#   
-#   #REGIONS
-#   regions=aggregate(CPUE~REGION+SPECIES,all_sp,mean)            #aggregate the CPUE by REGION and SPECIES
-#   regions1=acast(regions,REGION~SPECIES,value.var="CPUE")       #reshape de data frame into matrix-like for the metaMDS function
-#   regions1[is.na(regions1)]=0                                   #replace NA with 0 values as it means no capture 
-#   NMDS2=metaMDS(regions1,wascores=T)                            #nMDS
-#   plot(NMDS2,type="t",main=paste("nMDS-Bray, stress=",round(NMDS2$stress,3)))#nMDS biplot of a Bray–Curtis dissimilarity matrix of the species CPUE
-#   
-#   par(mfrow=c(1,2))
-#   stressplot(NMDS2,main="Sheppard plot")                        #Sheppard plot shows the appropriateness of the nMDS + linear and non-linear fit
-#   g.o.f=goodness(NMDS2)                                         #goodness of fit
-#   plot(NMDS2,type="t",main="Goodness of fit")                   #nMDS biplot + goodness of fit
-#   points(NMDS2,cex=g.o.f*200000)                                #poorly fitted years have larger bubbles
-#   
-#   #REGIONS AND YEARS
-#   years_regions=NULL
-#   plot_col=NULL
-#   for(i in sort(unique(all_sp$REGION)))
-#   {
-#     subset_region=subset(all_sp,REGION==i)                   
-#     years=aggregate(CPUE~YEAR+SPECIES,subset_region,mean)      #aggregate the CPUE by YEAR and SPECIES
-#     dummy.df=data.frame(YEAR=unique(years$YEAR)[1],SPECIES=unique(all_sp$SPECIES),CPUE=NA)#so all the species appear in the disimilarity matrix
-#     years1=rbind(years,dummy.df)  
-#     years2=acast(years1,YEAR~SPECIES,value.var="CPUE",fun.aggregate=mean,na.rm=T)#reshape de data frame into matrix-like for the metaMDS function
-#     years_regions=rbind(years_regions,years2)                  #growing table of years and species
-#     plot_col=c(plot_col,length(unique(years$YEAR)))            #for the plotting
-#   }
-#   years_regions[is.na(years_regions)]=0
-#   NMDS3=metaMDS(years_regions^(1/4),wascores=F,autotransform=F) #nMDS + fourth-root transformation to reduce variance
-#   plot(NMDS3,type="t",main=paste("nMDS-Bray, stress=",round(NMDS3$stress,3)))#nMDS biplot of a Bray–Curtis dissimilarity matrix of the species CPUE
-#   points(NMDS3,pch=20,col=c(rep(1,plot_col[1]),rep(2,plot_col[2]),rep(3,plot_col[3]),rep(4,plot_col[4]),rep(5,plot_col[5]),rep(6,plot_col[6])))
-#   legend("topright",sort(unique(all_sp$REGION)),pch=20,pt.cex=2,col=1:6)
-#   
-#   par(mfrow=c(1,2))
-#   stressplot(NMDS3,main="Sheppard plot")                        #Sheppard plot shows the appropriateness of the nMDS + linear and non-linear fit
-#   g.o.f=goodness(NMDS3)                                         #goodness of fit
-#   plot(NMDS3,type="t",main="Goodness of fit")                   #nMDS biplot + goodness of fit
-#   points(NMDS3,cex=g.o.f*200)                                   #poorly fitted years have larger bubbles
-#   
-#   #BIOREGIONS AND YEARS
-#   years_bioregions=NULL
-#   plot_col=NULL
-#   for(i in sort(unique(all_sp$BIOREGION)))
-#   {
-#     subset_bioregion=subset(all_sp,BIOREGION==i)                   
-#     years=aggregate(CPUE~YEAR+SPECIES,subset_bioregion,mean)   #aggregate the CPUE by YEAR and SPECIES
-#     dummy.df=data.frame(YEAR=unique(years$YEAR)[1],SPECIES=unique(all_sp$SPECIES),CPUE=NA)#so all the species appear in the disimilarity matrix
-#     years1=rbind(years,dummy.df)  
-#     years2=acast(years1,YEAR~SPECIES,value.var="CPUE",fun.aggregate=mean,na.rm=T)#reshape de data frame into matrix-like for the metaMDS function
-#     years_bioregions=rbind(years_bioregions,years2)            #growing table of years and species
-#     plot_col=c(plot_col,length(unique(years$YEAR)))            #for the plotting
-#   }
-#   years_bioregions[is.na(years_bioregions)]=0
-#   NMDS4=metaMDS(years_bioregions^(1/4),wascores=F,autotransform=F)#nMDS + fourth-root transformation to reduce variance
-#   plot(NMDS4,type="t",main=paste("nMDS-Bray, stress=",round(NMDS4$stress,3)))#nMDS biplot of a Bray–Curtis dissimilarity matrix of the species CPUE
-#   points(NMDS4,pch=20,col=c(rep(1,plot_col[1]),rep(2,plot_col[2])))
-#   legend("topright",sort(unique(all_sp$BIOREGION)),pch=20,pt.cex=2,col=1:2)
-#   
-#   par(mfrow=c(1,2))
-#   stressplot(NMDS4,main="Sheppard plot")                        #Sheppard plot shows the appropriateness of the nMDS + linear and non-linear fit
-#   g.o.f=goodness(NMDS4)                                         #goodness of fit
-#   plot(NMDS4,type="t",main="Goodness of fit")                   #nMDS biplot + goodness of fit
-#   points(NMDS4,cex=g.o.f*200)                                   #poorly fitted years have larger bubbles
-#   
-#   
-#   #######################
-#   #Only discarded species
-#   
-#   discarded=subset(DATA6,FATE=="D",select=c("SHEET_NO","YEAR","REGION","BIOREGION","ZONE","EFFORT","SPECIES","INDIVIDUALS"))#subset of dicarded records    
-#   discarded2=aggregate(INDIVIDUALS~SHEET_NO+SPECIES+YEAR+REGION+BIOREGION+ZONE+EFFORT,FUN=sum,data=discarded)#Individuals per sheet number and species
-#   discarded2$CPUE=discarded2$INDIVIDUALS/discarded2$EFFORT#CPUE calculation
-#   discarded2$SPECIES=as.factor(discarded2$SPECIES)
-#   
-#   #YEARS
-#   years=aggregate(CPUE~YEAR+SPECIES,discarded2,mean)           #aggregate the CPUE by YEAR and SPECIES
-#   years1=acast(years,YEAR~SPECIES,value.var="CPUE")            #reshape de data frame into matrix-like for the metaMDS function
-#   years1[is.na(years1)]=0                                      #replace NA with 0 values as it means no capture 
-#   NMDS5=metaMDS(years1^(1/4),wascores=T,autotransform=F)       #nMDS + fourth-root transformation to reduce variance
-#   plot(NMDS5,type="t",main=paste("nMDS-Bray, stress=",round(NMDS5$stress,3)))#nMDS biplot of a Bray–Curtis dissimilarity matrix of the species CPUE
-#   
-#   par(mfrow=c(1,2))
-#   stressplot(NMDS5,main="Sheppard plot")                       #Sheppard plot shows the appropriateness of the nMDS + linear and non-linear fit
-#   g.o.f=goodness(NMDS5)                                        #goodness of fit
-#   plot(NMDS5,type="t",main="Goodness of fit")                  #nMDS biplot + goodness of fit
-#   points(NMDS5,cex=g.o.f*200)                                  #poorly fitted years have larger bubbles
-#   
-#   #REGIONS
-#   regions=aggregate(CPUE~REGION+SPECIES,discarded2,mean)       #aggregate the CPUE by REGION and SPECIES
-#   regions1=acast(regions,REGION~SPECIES,value.var="CPUE")      #reshape de data frame into matrix-like for the metaMDS function
-#   regions1[is.na(regions1)]=0                                  #replace NA with 0 values as it means no capture 
-#   NMDS6=metaMDS(regions1^(1/4),wascores=T,autotransform=F)     #nMDS + fourth-root transformation to reduce variance
-#   plot(NMDS6,type="t",main=paste("nMDS-Bray, stress=",round(NMDS6$stress,3)))#nMDS biplot of a Bray–Curtis dissimilarity matrix of the species CPUE
-#   
-#   par(mfrow=c(1,2))
-#   stressplot(NMDS6,main="Sheppard plot")                       #Sheppard plot shows the appropriateness of the nMDS + linear and non-linear fit
-#   g.o.f=goodness(NMDS6)                                        #goodness of fit
-#   plot(NMDS6,type="t",main="Goodness of fit")                  #nMDS biplot + goodness of fit
-#   points(NMDS6,cex=g.o.f*200000)                               #poorly fitted years have larger bubbles
-#   
-#   #REGIONS AND YEARS
-#   years_regions=NULL
-#   plot_col=NULL
-#   for(i in sort(unique(discarded2$REGION)))
-#   {
-#     subset_region=subset(discarded2,REGION==i)                   
-#     years=aggregate(CPUE~YEAR+SPECIES,subset_region,mean)     #aggregate the CPUE by YEAR and SPECIES
-#     dummy.df=data.frame(YEAR=unique(years$YEAR)[1],SPECIES=unique(discarded2$SPECIES),CPUE=NA)#so all the species appear in the matrix
-#     years1=rbind(years,dummy.df)  
-#     years2=acast(years1,YEAR~SPECIES,value.var="CPUE",fun.aggregate=mean,na.rm=T)#reshape de data frame into matrix-like for the metaMDS function
-#     years_regions=rbind(years_regions,years2)                 #growing table of years and species
-#     plot_col=c(plot_col,length(unique(years$YEAR)))           #for the plotting
-#   }
-#   years_regions[is.na(years_regions)]=0
-#   NMDS7=metaMDS(years_regions^(1/4),wascores=F,autotransform=F)#nMDS + fourth-root transformation to reduce variance
-#   plot(NMDS7,type="t",main=paste("nMDS-Bray, stress=",round(NMDS7$stress,3)))#nMDS biplot of a Bray–Curtis dissimilarity matrix of the species CPUE
-#   points(NMDS7,pch=20,col=c(rep(1,plot_col[1]),rep(2,plot_col[2]),rep(3,plot_col[3]),rep(4,plot_col[4]),rep(5,plot_col[5]),rep(6,plot_col[6])))
-#   legend("topright",sort(unique(discarded2$REGION)),pch=20,pt.cex=2,col=1:6)
-#   
-#   par(mfrow=c(1,2))
-#   stressplot(NMDS7,main="Sheppard plot")                       #Sheppard plot shows the appropriateness of the nMDS + linear and non-linear fit
-#   g.o.f=goodness(NMDS7)                                        #goodness of fit
-#   plot(NMDS7,type="t",main="Goodness of fit")                  #nMDS biplot + goodness of fit
-#   points(NMDS7,cex=g.o.f*200)                                  #poorly fitted years have larger bubbles
-#   
-#   #BIOREGIONS AND YEARS
-#   years_bioregions=NULL
-#   plot_col=NULL
-#   for(i in sort(unique(discarded2$BIOREGION)))
-#   {
-#     subset_bioregion=subset(discarded2,BIOREGION==i)                   
-#     years=aggregate(CPUE~YEAR+SPECIES,subset_bioregion,mean)  #aggregate the CPUE by YEAR and SPECIES
-#     dummy.df=data.frame(YEAR=unique(years$YEAR)[1],SPECIES=unique(discarded2$SPECIES),CPUE=NA)#so all the species appear in the matrix
-#     years1=rbind(years,dummy.df)  
-#     years2=acast(years1,YEAR~SPECIES,value.var="CPUE",fun.aggregate=mean,na.rm=T)#reshape de data frame into matrix-like for the metaMDS function
-#     years_bioregions=rbind(years_bioregions,years2)           #growing table of years and species
-#     plot_col=c(plot_col,length(unique(years$YEAR)))           #for the plotting
-#   }
-#   years_bioregions[is.na(years_bioregions)]=0
-#   NMDS8=metaMDS(years_bioregions^(1/4),wascores=T,autotransform=F)#nMDS + fourth-root transformation to reduce variance
-#   plot(NMDS8,type="t",main=paste("nMDS-Bray, stress=",round(NMDS8$stress,3)))#nMDS biplot of a Bray–Curtis dissimilarity matrix of the species CPUE
-#   points(NMDS8,pch=20,col=c(rep(1,plot_col[1]),rep(2,plot_col[2])))
-#   legend("topright",sort(unique(discarded2$BIOREGION)),pch=20,pt.cex=2,col=1:2)
-#   
-#   ########
-#   #ANOSIM#
-#   ########
-#   
-#   ANOSIM=unique(discarded2[,c("SHEET_NO","YEAR","ZONE","REGION","BIOREGION")])#data frame with the factors for each sample (i.e. sheet number)
-#   ano.cpue=acast(discarded2[,c("SHEET_NO","SPECIES","CPUE")],SHEET_NO~SPECIES,value.var="CPUE")#reshape de data frame into matrix-like for the anosim function
-#   ano.cpue[is.na(ano.cpue)]=0                                 #replace NA with 0 values as it means no capture 
-#   ano.cpue2=ano.cpue^(1/4)                                    #fourth-root transformation to reduce variance
-#   ano.cpue3=vegdist(ano.cpue2)
-#   
-#   #YEARS
-#   ANOSIM.YEARS=anosim(dat=ano.cpue3,grouping=ANOSIM$YEAR,permutations=999)#takes ~4 minutes to compute
-#   
-#   #REGIONS
-#   ANOSIM.REGIONS=anosim(dat=ano.cpue3,grouping=ANOSIM$REGION,permutations=999)#takes ~4 minutes to compute
-#   
-#   #BIOREGIONS
-#   ANOSIM.BIOREGIONS=anosim(dat=ano.cpue3,grouping=ANOSIM$BIOREGION,permutations=999)#takes ~4 minutes to compute
-#   
-#   ########
-#   #SIMPER#
-#   ########
-#   
-#   #YEARS
-#   SIMPER.YEARS=simper(comm=ano.cpue2,group=ANOSIM$YEAR)
-#   summary(SIMPER.YEARS)    
-#   
-#   #REGIONS
-#   SIMPER.REGIONS=simper(comm=ano.cpue2,group=ANOSIM$REGION)
-#   summary(SIMPER.REGIONS)
-#   
-#   #REGIONS
-#   SIMPER.BIOREGIONS=simper(comm=ano.cpue2,group=ANOSIM$BIOREGION)
-#   summary(SIMPER.BIOREGIONS)
-#   
-#   
-#   #############################
-#   #Bycatch proportion analyses#
-#   #############################
-#   
-#   DATA7=subset(DATA,NATURE!="TEPS" & REGION!="Out.of.region" & !is.na(EFFORT))#not using TEPS, out of region and no effort data
-#   
-#   #Number of discarded sharks, rays and TEPS in total surveys
-#   no.surveys=length(unique(DATA7$SHEET_NO))                    #number of total surveys
-#   discarded=subset(DATA7, FATE=="D")                           #subset of dicarded records
-#   no.surveys2=length(unique(discarded$SHEET_NO))               #number of surveys with discards
-#   no.surveys2*100/no.surveys                                   #percentage of surveys with discards from total surveys
-#   dim(discarded)[1]                                            #total discarded individuals
-#   dim(discarded)[1]*100/dim(DATA7)[1]                          #percentage of discarded individuals from total individuals
-#   range(table(discarded$SHEET_NO))                             #range of discarded individuals per survey
-#   hist(table(discarded$SHEET_NO),breaks=200)                   #histogram of discarded individuals per survey
-#   
-#   #Discard proportion calculation
-#   discards=subset(DATA7, FATE=="D" | FATE=="C")                #only discarded or commercial species
-#   vector=NULL                                                  #dummy
-#   for(i in unique(discards$SHEET_NO)){
-#     sheet_no=subset(discards, SHEET_NO==i)
-#     proportion=sum(sheet_no$FATE=="D")/dim(sheet_no)[1]
-#     vector=c(vector,proportion)
-#   }                                                         #this loop takes ~3 minutes to compute 
-#   glm_dataframe=data.frame(SHEET_NO=unique(discards$SHEET_NO),PROPORTION=vector)#new data frame with discarded individual proportions
-#   
-#   #Proportion distribution
-#   hist(glm_dataframe$PROPORTION)
-#   boxplot(glm_dataframe$PROPORTION)                               
-#   
-#   #GLM modelling
-#   glm_data_frame=merge(glm_dataframe,discards,by="SHEET_NO")   #data frame for the glm
-#   merging=aggregate(PROPORTION~SHEET_NO+YEAR+MONTH+REGION+BLOCK+BOTDEPTH+NET_LENGTH+SOAK_TIME,glm_data_frame,mean)
-#   glm1=glm(PROPORTION~YEAR+BLOCK+BOTDEPTH+NET_LENGTH+SOAK_TIME+REGION,family=quasibinomial,data=merging) 
-#   
-#   #GAMLSS modelling fitted with a zero-inflated beta distribution (BEZI)
-#   model=gamlss(PROPORTION~YEAR+BOTDEPTH+NET_LENGTH+SOAK_TIME+REGION,family=BEINF,data=na.omit(merging))#use beta inflated distribution
-#   summary(model)
-#   plot(model)
-#   
-#   #BRT/Random forest
-#   
-#   #??????
-#   
-#   
-#   ################################################################################################################################################
-#   ################################################################################################################################################
-#   ################################################################################################################################################
-#   
-#   #General plotting
-#   
-#   #Data plotting (data+blocks+towns+bioregions)
-#   DATA$LAT_BLOCK=-as.numeric(substr(DATA$BLOCK,1,2))
-#   DATA$LONG_BLOCK=as.numeric(substr(DATA$BLOCK,3,4))+100
-#   
-#   map("worldHires",xlim=c(112.95,129.5),ylim=c(-36,-26.5),type="n")
-#   polygon(c(105,117,117,115.5,115.5,105),c(-27,-27,-34.15,-34.15,-40,-40),col="lightblue",border=NA)#Source:Department of Fisheries of WA (website)
-#   polygon(c(115.5,117,117,130,130,115.5),c(-34.15,-34.15,-29,-29,-40,-40),col="lightgreen",border=NA)
-#   map("worldHires",xlim=c(112.95,129.5),ylim=c(-36,-26.5),col="grey80",interior=T,fill=T,border="black",add=T)
-#   points(DATA$LONGITUDE,DATA$LATITUDE,col=2,pch=20,cex=0.1)
-#   rect(DATA$LONG_BLOCK,DATA$LAT_BLOCK-1,DATA$LONG_BLOCK+1,DATA$LAT_BLOCK,border="blue")
-#   text(c(116.35,115.41,115.86,115.8,117.884,121.9,128.848),c(-31.95,-28.773,-30.5,-34.314,-34.8,-33.6,-31.5),labels=c("Perth","Geraldton","Cervantes","Augusta","Albany","Esperance","Eucla"),cex=c(rep(0.5,7),0.7))
-#   legend(c(124,124),c(-27,-27.5),c("West Coast","South Coast"),fill=c("lightblue","lightgreen"),bty="n")
-#   box()
-#   
-#   #Zones plotting
-#   map("worldHires",xlim=c(112,129),ylim=c(-36,-12.5),type="n")
-#   polygon(c(116.5,116.5,130,130),c(-26,-40,-40,-26),col="blue",border=NA)#Zone1
-#   polygon(c(116.5,116.5,110,110),c(-33,-40,-40,-33),col="red",border=NA)#Zone2
-#   polygon(c(116.5,116.5,110,110),c(-26,-33,-33,-26),col="green",border=NA)#West
-#   polygon(c(114,114,110,110),c(-26,-10,-10,-26),col="black",border=NA)#Closed
-#   polygon(c(114,114,123.75,123.75),c(-26,-10,-10,-26),col="orange",border=NA)#North
-#   polygon(c(123.75,123.75,130,130),c(-26,-10,-10,-26),col="yellow",border=NA)#Joint
-#   map("worldHires",xlim=c(112,129),ylim=c(-36,-12.5),col="grey80",interior=T,fill=T,border=NA,add=T)
-#   legend(x=122,y=-21,legend=c("Zone 1","Zone 2","West","Closed","North","Joint"),fill=c("blue","red","green","black","orange","yellow"),bty="n")
-#   box()
-#   
-#   #Regions plotting
-#   map("worldHires",xlim=c(108,129),ylim=c(-39,-27),type="n")
-#   polygon(c(129,124,124,129,129),c(-30,-30,-36,-35,-30),col="lightblue")#Region1
-#   polygon(c(124,119,119,124,124),c(-33,-33,-38,-37,-33),col="lightblue")#Region2
-#   polygon(c(119,116,116,119,119),c(-34,-34,-38,-38,-34),col="lightblue")#Region3
-#   polygon(c(116,112,112,116,116),c(-33,-33,-37,-37,-33),col="lightblue")#Region4
-#   polygon(c(116,110,112,116,116),c(-30,-30,-33,-33,-30),col="lightblue")#Region5
-#   polygon(c(115,109,110,115,115),c(-27,-27,-30,-30,-27),col="lightblue")#Region6
-#   map("worldHires",xlim=c(108,129),ylim=c(-39,-27),col="grey80",interior=T,fill=T,add=T)
-#   text(c(126.5,121.5,117.5,114,113,112),c(-34,-35.5,-36,-35.5,-31.5,-28.5),c("Region 1","Region 2","Region 3","Region 4","Region 5","Region 6"),cex=0.8)
-#   box()
-#   
-#   #Plot for spatio-temporal decisions
-#   DATA$LAT_BLOCK=-as.numeric(substr(DATA$BLOCK,1,2))
-#   DATA$LONG_BLOCK=as.numeric(substr(DATA$BLOCK,3,4))+100
-#   DATA$MONTH=as.numeric(DATA$MONTH)
-#   DATA99=subset(DATA,REGION!="Out.of.region")
-#   DATA99$N=1
-#   DATA99=DATA99[!duplicated(DATA99$SHEET_NO),]
-#   aggr=aggregate(N~YEAR+SEASON+BLOCK+LAT_BLOCK+LONG_BLOCK,FUN=sum,data=DATA99)
-#   for(i in sort(unique(aggr$YEAR)))
-#   {
-#     sub.set=subset(aggr,YEAR==i)
-#     #pdf(file=paste(i,".pdf",sep=""))
-#     tiff(file=paste(getwd(),"/MAPS/",i,".tiff",sep=""),width=2400,height=2000,units="px",res=300,compression="lzw")
-#     par(mfrow=c(2,2),oma=c(.1,.1,.1,.1))
-#     for(j in sort(unique(aggr$SEASON)))
-#     {
-#       sub.set2=subset(sub.set,SEASON==j)
-#       if(dim(sub.set2)[1]==0) 
-#       {plot(1,type="n",main=paste(i,j,sep=" "),axes=F,xlab=NA,ylab=NA)
-#         text(1,1,"NO SURVEYS")
-#       }else
-#       {
-#         map("worldHires",xlim=c(112.95,129.5),ylim=c(-36,-26.5),main=j,col="grey80",interior=T,fill=T,border=F)
-#         rect(DATA$LONG_BLOCK,DATA$LAT_BLOCK-1,DATA$LONG_BLOCK+1,DATA$LAT_BLOCK,border="blue")
-#         numbers=as.character(sub.set2$N)
-#         text(x=sub.set2$LONG_BLOCK+0.5,y=sub.set2$LAT_BLOCK-0.5,labels=numbers,cex=0.75)
-#         title(paste(i,j,sep=" "))
-#       }
-#     }
-#     dev.off()
-#   }
-#   
-#   
-#   #E.g. LOOp
-#   
-#   #Define spatial groups
-#   DATA$Group=
-#     
-#     Grupos=unique(DATA$Group)
-#   
-#   Lista=vector('list',length(Grupos))
-#   names(Lista)=Grupos
-#   
-#   for (i in 1:length(Grupos))
-#   {
-#     Ll=list(Diversity=NULL,Ecosystem=NULL)
-#     
-#     D=subset(DATA,Group==Grupos[i])
-#     
-#     #Diversity indices
-#     Ll$Diversity=  #hills function outputs
-#       
-#       #Ecosystem indices
-#       Ll$Ecosystem= # ecosystem function output
-#       
-#       
-#       
-#       Lista[[i]]=Ll
-#   }
-#   
-#   
-#   ################################################################################
-#   ################################################################################
-#   ################################################################################
-#   
-#   ####################################################################################################
-#   #2. Manipulated MAFFRI shark gillnet data
-#   DATA.MAFFRI$SHEET_NO=with(DATA.MAFFRI,paste(Cruise,Station))
-#   
-#   DATA.MAFFRI$Mid.Lat=-DATA.MAFFRI$StartLat/100
-#   DATA.MAFFRI$Mid.Long=DATA.MAFFRI$StartLong/100
-#   
-#   DATA_TEPS.MAFFRI$Mid.Lat=-DATA_TEPS.MAFFRI$StartLat/100
-#   DATA_TEPS.MAFFRI$Mid.Long=DATA_TEPS.MAFFRI$StartLong/100
-#   
-#   DATA.MAFFRI=DATA.MAFFRI[,-match(c("StartLat","StartLong","Dummy"),names(DATA.MAFFRI))]
-#   DATA_TEPS.MAFFRI=DATA_TEPS.MAFFRI[,-match(c("StartLat","StartLong","Dummy"),names(DATA_TEPS.MAFFRI))]
-#   ####################################################################################################
-#   
-#   #3.2 MAFFRI
-#   DATA.MAFFRI
-#   
-#   
-#   #TEPS analysis
-#   DATA_TEPS.MAFFRI
-#   
-# }

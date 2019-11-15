@@ -4,9 +4,10 @@
 
 
 #Commercial catch and effort TDGDLF
-Data.monthly=read.csv("C:/Matias/Analyses/Catch and effort/Data.monthly.csv",stringsAsFactors=F)
-Effort.monthly=read.csv("C:/Matias/Analyses/Catch and effort/Effort.monthly.csv",stringsAsFactors=F)
-Effort.daily=read.csv("C:/Matias/Analyses/Catch and effort/Effort.daily.csv",stringsAsFactors=F)
+Data.monthly=read.csv("C:/Matias/Analyses/Data_outs/Data.monthly.csv",stringsAsFactors=F)
+Data.daily=read.csv("C:/Matias/Analyses/Data_outs/Data.daily.csv",stringsAsFactors=F)
+Effort.monthly=read.csv("C:/Matias/Analyses/Data_outs/Effort.monthly.csv",stringsAsFactors=F)
+Effort.daily=read.csv("C:/Matias/Analyses/Data_outs/Effort.daily.csv",stringsAsFactors=F)
 
 
 
@@ -68,9 +69,6 @@ Data.monthly$YEAR=Data.monthly$FINYEAR
 Data.monthly$BLOCK=Data.monthly$BLOCKX
 Data.monthly$BOAT=Data.monthly$VESSEL
 Data.monthly$SKIPPER=NA
-  
-#Data.monthly$TROPHIC_LEVEL=runif(nrow(Data.monthly),1,5)    #missing, get from Agustin
-#Data.monthly$TL_SD=NA
   
 Data.monthly$EFFORT=Data.monthly$Km.Gillnet.Days.c
 Data.monthly$LATITUDE=Data.monthly$LAT
