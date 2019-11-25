@@ -16,7 +16,8 @@
 #           2.2 WA Fisheries commercial data
 #         3. Multivariate analysis
 
-
+#missing: Commercial TDGDLF. Keep Monthly and Daily separate!!!
+#         Do Sections 3 to 6 and 7.1
 
 rm(list=ls(all=TRUE))
 
@@ -49,7 +50,7 @@ source("C:/Matias/Analyses/Ecosystem indices and multivariate/Git_ecosy.and.muti
 #choose if doing .jpeg or .tiff figures
 Do.jpeg="YES"
 Do.tiff="NO"
-source("C:/Matias/Analyses/SOURCE_SCRIPTS/Smart_par.R")
+source("C:/Matias/Analyses/SOURCE_SCRIPTS/Git_other/Smart_par.R")
 
 
 # 1 Data section-----------------------------------------------------------------------
@@ -60,46 +61,38 @@ rm(DATA)
 DATA=DATA.ecosystems
 
 
+# 2. Bring in WA Species names + PCS + FATE
 setwd("C:/Matias/Analyses/Ecosystem indices and multivariate/Shark-bycatch")
-
-# 2. Bring in MAFFRI shark gillnet data
-#DATA.MAFFRI=read.csv("MAFFRI_data.csv")
-#DATA_TEPS.MAFFRI=read.csv("MAFFRI_TEPS_data.csv")
-
-
-# 3. Bring in WA Species names + PCS + FATE
 SPECIES_PCS_FATE=read.csv("SPECIES+PCS+FATE.csv",stringsAsFactors=F)
 SPECIES_PCS_FATE_Com=read.csv("SPECIES+PCS+FATE_Com.csv",stringsAsFactors=F)
 
-# 4. Bring in Length coefficients
+# 3. Bring in Length coefficients
 Len.cof=read.csv("Raw coefficents table.csv")
 
 
-#5. Bring in Commercial data
+#4. Bring in Commercial data
 source("C:/Matias/Analyses/Ecosystem indices and multivariate/Git_ecosy.and.mutivariate/Commercial_data_for_Ecosystem_Analysis.R")
 
 
 
 #CONTROL
-
+  #Selection of recrods
 Min.shts=10 #USe records with at least 10 shots per year-block
-Min.shts.sens=c(5,20)
-
 Min.recs=5 #minimum number of records
-
 Min.individuals=5   #minimum number of individuals per shot to use
 
-MixedEff=NA
-#MixedEff="BOAT"
+  #vessel used as mixed effect
+MixedEff="BOAT"   
 
-do.exploratory="NO"  #choose if doing data exploration
+  #choose if doing data exploration
+do.exploratory="NO"  
 
 niter=100    #number of iterations for MC procedure for confidence intervals
 
 #Percent.show.bycatch=0.8   #proportion of bycatch explained
 #Prop.TC.bycatch=0.05       #proportion of catch explained
 
-use.soak.time="NO"  #define if using soak time in the calculation of effort
+use.soak.time="YES"  #define if using soak time in the calculation of effort
 
 
 ResVar="INDIVIDUALS"
@@ -109,9 +102,6 @@ Predictors=c("YEAR","BLOCK","BOAT","MONTH","BOTDEPTH")
 Expl.varS=c("YEAR","BOAT","MONTH","BLOCK","BOTDEPTH")
 FactoRS=Expl.varS[-match(c("BOTDEPTH"),Expl.varS)]
 OFFSETT=NA
-#OFFSETT="offset(log.EFFORT)"
-
-
 
 # 2 Functions-----------------------------------------------------------------------
 
@@ -1365,52 +1355,11 @@ plot.comm=function(dat.plt,MAIN,Cx,YLIM,Cx.axs)
 }
 
 
+
 # 3 Precedure section-----------------------------------------------------------------------
 
-#1. Manipulated WA shark observer data
-
-#Extract year and month
-DATA$DATE=as.Date(DATA$date,format="%d/%m/%Y")
-DATA$YEAR=as.numeric(strftime(DATA$DATE, format="%Y"))
-DATA$MONTH=as.numeric(strftime(DATA$DATE, format="%m"))
-
-
-
-#Fix method and mesh size issues
-DATA$Method=with(DATA,ifelse(is.na(Method) & BOAT%in%c("B67","F244","F517","E35"),"GN",Method))
-DATA$MESH_SIZE=with(DATA,ifelse(is.na(MESH_SIZE) & BOAT=="B67" & YEAR>1997,"7",
-                           ifelse(is.na(MESH_SIZE) & BOAT=="F517" & YEAR>2002,"7",MESH_SIZE)))
-
-#Select commercial gillnet and mesh size
-DATA=subset(DATA,Method=="GN" & MESH_SIZE%in%c("6","6.5","7"))     
-Research.vess=c("HAM","HOU","RV GANNET","RV BREAKSEA","NATT","NAT","FLIN","RV SNIPE 2")
-DATA=subset(DATA,!BOAT%in%Research.vess)
-ALL.yrs=sort(as.numeric(unique(DATA$YEAR)))
-
-
-#Get latitude and longitude from de first end of the net for location
-DATA$LATITUDE=as.numeric(paste(DATA$END1LATD,".",ifelse(trunc(DATA$END1LATM*100/60)>=10,
-                                                   paste(substr(DATA$END1LATM*100/60,1,2),substr(DATA$END1LATM*100/60,4,5),sep=""),
-                                                   paste(0,substr(DATA$END1LATM*100/60,1,1),substr(DATA$END1LATM*100/60,3,4),sep="")),sep=""))
-DATA$LONGITUDE=as.numeric(paste(DATA$END1LNGD,".",ifelse(trunc(DATA$END1LNGM*100/60)>=10,
-                                                   paste(substr(DATA$END1LNGM*100/60,1,2),substr(DATA$END1LNGM*100/60,4,5),sep=""),
-                                                   paste(0,substr(DATA$END1LNGM*100/60,1,1),substr(DATA$END1LNGM*100/60,3,4),sep="")),sep=""))
-
-#Data range
-DATA=subset(DATA, LATITUDE<(-26) | LATITUDE==0) #zero to include the dodgy sheet numbers F00001, F00002 and F00003 with zero position
-
-#Fix sex
-DATA$SEX=as.character(DATA$SEX)
-DATA$SEX=with(DATA,ifelse(SEX%in%c("f","F"),"F",ifelse(SEX%in%c("m","M"),"M","U")))
-
-
-#Get TEPS interactions from Comments in boat.hdr  
-Comments=subset(DATA,select=c(SHEET_NO,COMMENTS.hdr))
-Comments=Comments[!is.na(Comments$COMMENTS.hdr),]
-Comments=Comments[!duplicated(Comments$SHEET_NO),]
-
-#Manipulate trophic levels
-#note: add SD from FishBase to Cortes'; use FishBase for Teleosts
+#3.1. Manipulate trophic levels
+  #add SD from FishBase to Cortes'; use FishBase for Teleosts
 SPECIES_PCS_FATE$TL_SD=with(SPECIES_PCS_FATE,ifelse(is.na(TL_SD)& NATURE%in%c("T"),TL_SD2,
             ifelse(is.na(TL_SD)& NATURE%in%c("S","R"),TROPHIC_LEVEL*TL_SD2/TROPHIC_LEVEL2,
             TL_SD)))
@@ -1422,30 +1371,65 @@ SPECIES_PCS_FATE_Com$TL_SD=with(SPECIES_PCS_FATE_Com,ifelse(is.na(TL_SD)& NATURE
 SPECIES_PCS_FATE_Com$TROPHIC_LEVEL=with(SPECIES_PCS_FATE_Com,
             ifelse(is.na(TROPHIC_LEVEL),TROPHIC_LEVEL2,TROPHIC_LEVEL))
 
-#Manually fixing inconsistencies in trophic level
+  #Manually fixing inconsistencies in trophic level
 SPECIES_PCS_FATE$TROPHIC_LEVEL=with(SPECIES_PCS_FATE,ifelse(SPECIES=="TG",TROPHIC_LEVEL2,
             ifelse(SPECIES=="PD",4.1,TROPHIC_LEVEL)))
 SPECIES_PCS_FATE_Com$TROPHIC_LEVEL=with(SPECIES_PCS_FATE_Com,
             ifelse(SPECIES==18022,4.5,TROPHIC_LEVEL))
 
 
+#3.2. Manipulated WA shark observer data
 
-#Add common and scientific names, nature, fate, PCS and trophic level
+  #Extract year and month
+DATA$DATE=as.Date(DATA$date,format="%d/%m/%Y")
+DATA$YEAR=as.numeric(strftime(DATA$DATE, format="%Y"))
+DATA$MONTH=as.numeric(strftime(DATA$DATE, format="%m"))
+
+  #Fix method and mesh size issues
+DATA$Method=with(DATA,ifelse(is.na(Method) & BOAT%in%c("B67","F244","F517","E35"),"GN",Method))
+DATA$MESH_SIZE=with(DATA,ifelse(is.na(MESH_SIZE) & BOAT=="B67" & YEAR>1997,"7",
+                                ifelse(is.na(MESH_SIZE) & BOAT=="F517" & YEAR>2002,"7",MESH_SIZE)))
+
+  #Select commercial gillnet and mesh size
+DATA=subset(DATA,Method=="GN" & MESH_SIZE%in%c("6","6.5","7"))     
+Research.vess=c("HAM","HOU","RV GANNET","RV BREAKSEA","NATT","NAT","FLIN","RV SNIPE 2")
+DATA=subset(DATA,!BOAT%in%Research.vess)
+ALL.yrs=sort(as.numeric(unique(DATA$YEAR)))
+
+  #Get latitude and longitude from de first end of the net for location
+DATA$LATITUDE=as.numeric(paste(DATA$END1LATD,".",ifelse(trunc(DATA$END1LATM*100/60)>=10,
+                                                        paste(substr(DATA$END1LATM*100/60,1,2),substr(DATA$END1LATM*100/60,4,5),sep=""),
+                                                        paste(0,substr(DATA$END1LATM*100/60,1,1),substr(DATA$END1LATM*100/60,3,4),sep="")),sep=""))
+DATA$LONGITUDE=as.numeric(paste(DATA$END1LNGD,".",ifelse(trunc(DATA$END1LNGM*100/60)>=10,
+                                                         paste(substr(DATA$END1LNGM*100/60,1,2),substr(DATA$END1LNGM*100/60,4,5),sep=""),
+                                                         paste(0,substr(DATA$END1LNGM*100/60,1,1),substr(DATA$END1LNGM*100/60,3,4),sep="")),sep=""))
+  #Data range
+DATA=subset(DATA, LATITUDE<(-26) | LATITUDE==0) #zero to include the dodgy sheet numbers F00001, F00002 and F00003 with zero position
+
+  #Fix sex
+DATA$SEX=as.character(DATA$SEX)
+DATA$SEX=with(DATA,ifelse(SEX%in%c("f","F"),"F",ifelse(SEX%in%c("m","M"),"M","U")))
+
+  #Get TEPS interactions from Comments in boat.hdr  
+Comments=subset(DATA,select=c(SHEET_NO,COMMENTS.hdr))
+Comments=Comments[!is.na(Comments$COMMENTS.hdr),]
+Comments=Comments[!duplicated(Comments$SHEET_NO),]
+
+  #Add common and scientific names, nature, fate, PCS and trophic level
 DATA=merge(DATA,subset(SPECIES_PCS_FATE,SPECIES%in%unique(DATA$SPECIES)),by="SPECIES",all.x=T)
 
-#Special treatment for White shark (WP) and Grey nurse shark (GN) as they became protected throughout the period
+  #Special treatment for White shark (WP) and Grey nurse shark (GN) as they became protected throughout the period
 DATA$FATE=ifelse(DATA$SPECIES=="WP",ifelse(DATA$YEAR<1997,"C","D"), 
             ifelse(DATA$SPECIES=="GN",ifelse(DATA$YEAR<2001,"C","D"),as.character(DATA$FATE)))
               
 DATA$NATURE=ifelse(DATA$SPECIES=="WP" | DATA$SPECIES=="GN",ifelse(DATA$FATE=="C","S","TEPS"),as.character(DATA$NATURE))           
                                                
-#remove unkwnown species codes
+  #remove unkwnown species codes
 a=subset(DATA,is.na(FATE),selec=c(SPECIES,COMMON_NAME));a=a[!duplicated(a$SPECIES),]
 NN.sp=a$SPECIES
 DATA=subset(DATA,!SPECIES%in%NN.sp)
 
-
-#Add fishing zones (from Department of Fisheries WA)
+  #Add fishing zones (from Department of Fisheries WA)
 DATA$LATITUDE=with(DATA,ifelse(LATITUDE==0,-as.numeric(substr(BLOCK,1,2)),LATITUDE))
 DATA$LONGITUDE=with(DATA,ifelse(LONGITUDE==0,100+as.numeric(substr(BLOCK,3,4)),LONGITUDE))
 
@@ -1457,9 +1441,7 @@ DATA$ZONE=as.character(with(DATA,ifelse(LONGITUDE>=116.5 & LATITUDE<=(-26),"Zone
          ifelse(LATITUDE>(-26) & LONGITUDE>=114 & LONGITUDE<123.75,"North",
         ifelse(LATITUDE>(-26) & LONGITUDE>=123.75,"Joint",NA))))))))
 
-
-                                                                    
-#Add regions (from Hall & Wise 2011)
+  #Add regions (from Hall & Wise 2011)
 DATA$REGION=as.character(with(DATA,ifelse(LONGITUDE>=124 & LONGITUDE<=129,"Region1",
        ifelse(LONGITUDE>=119 & LONGITUDE<124,"Region2",
        ifelse(LONGITUDE>=116 & LONGITUDE<119,"Region3",
@@ -1467,16 +1449,13 @@ DATA$REGION=as.character(with(DATA,ifelse(LONGITUDE>=124 & LONGITUDE<=129,"Regio
        ifelse(LATITUDE>(-33) & LATITUDE<=(-30),"Region5",
        ifelse(LATITUDE>(-30) & LATITUDE<=(-27),"Region6","Out.of.region"))))))))
 
-#Add bioregions (from Department of Fisheries WA)
-DATA$BIOREGION=ifelse(DATA$REGION=="Region1"|DATA$REGION=="Region2"|DATA$REGION=="Region3","SouthCoast","WestCoast")
-
-#Add area variable for temporal comparison
+  #Add area variable for temporal comparison
 DATA$AREA=as.character(with(DATA,ifelse(BLOCK%in%c(2813,2814,2914),"Area1",
         ifelse(BLOCK%in%c(3114,3115,3214,3215),"Area2",
         ifelse(BLOCK%in%c(3314,3315,3414,3415),"Area3",
         ifelse(BLOCK%in%c(3322,3323,3324),"Area4",NA))))))
 
-#Add period variable for spatial comparison
+  #Add period variable for spatial comparison
 DATA$SEASON=as.character(with(DATA,ifelse(MONTH==12 | MONTH<3,"Summer",
          ifelse(MONTH>=3 & MONTH<6,"Autumn",
          ifelse(MONTH>=6 & MONTH<9,"Winter",
@@ -1487,22 +1466,20 @@ DATA$PER=as.character(with(DATA,paste(Yr.dummy,SEASON)))
 DATA$PERIOD=with(DATA,ifelse(substr(PER,1,2)=="NA",NA,PER))
 DATA=DATA[,-match(c("Yr.dummy","PER"),colnames(DATA))]
 
-
-#Add gillnet absolute effort
+  #Add gillnet effort
 if(use.soak.time=="YES") DATA$EFFORT=DATA$NET_LENGTH*DATA$SOAK_TIME
 if(use.soak.time=="NO") DATA$EFFORT=DATA$NET_LENGTH
 
-
-#Remove tropical species that belong to the Northern Territory and the "other sharks and scale fish" group
+  #Remove tropical species that belong to the Northern Territory and the "other sharks and scale fish" group
 DATA=subset(DATA, FATE!="A" & SPECIES!="XX")
 
-#Add number caught
+  #Add number caught
 DATA$INDIVIDUALS=1
 
-#Fix fork length by total length
+  #Fix fork length by total length
 DATA$FL=with(DATA,{ifelse(NATURE=="T",TL,FL)})#for teleosts copy TL to FL as is the only measure and we want the indeces with the TL 
 
-#Sharks and rays
+  #Sharks and rays
 Sp.len.dat=as.character(Len.cof$Species)
 ID=with(DATA,which(COMMON_NAME%in%Sp.len.dat & is.na(FL) & !is.na(TL)))
 DATA.fix=DATA[ID,]
@@ -1512,7 +1489,7 @@ DATA.fix$FL=with(DATA.fix,(TL-Intercept)/Slope)
 DATA.fix=DATA.fix[,match(names(DATA),names(DATA.fix))]
 DATA=rbind(DATA,DATA.fix)
 
-#Select relevant variables
+  #Select relevant variables
 DATA=subset(DATA,select=c(SHEET_NO,YEAR,MONTH,BLOCK,BOAT,SKIPPER,SPECIES,FATE,
                           COMMON_NAME,NATURE,TL,FL,SEX,TROPHIC_LEVEL,TL_SD,BOTDEPTH,
                           MESH_SIZE,NET_LENGTH,SOAK_TIME,EFFORT,LATITUDE,LONGITUDE,
@@ -1523,13 +1500,10 @@ DATA$YEAR=as.character(DATA$YEAR)
 DATA$MONTH=as.character(DATA$MONTH)
 DATA$BLOCK=as.character(DATA$BLOCK)
 
-#Output
-#write.csv(DATA, "DATA.csv", row.names=F)
 
 # 4 Ecosystems indicators analysis-----------------------------------------------------------------------
 
   #--- 4.1 WA Fisheries observer data---
-
 
 # 4.1.1 Preliminary analyses
 #No of sheet number per year
@@ -1979,7 +1953,7 @@ dev.off()
 # 7 Multivariate analysis-----------------------------------------------------------------------
 source("C:/Matias/Analyses/SOURCE_SCRIPTS/Git_other/Multivariate_statistics.R")
 
-  #7.1  Logbook
+  #7.1  Observer data
 DataSets=c("proportion")   #response variables
 Predictors=c("YEAR","BLOCK","BOAT","MONTH","BOTDEPTH")
 IDVAR=Predictors
@@ -2017,6 +1991,50 @@ for(s in 1:length(STore.multi.var.observer))
 }
 
   #7.2 Commercial
+fn.min.obs.ef=function(d,subset.sp)
+{
+  d=d%>%mutate(ktch=1,
+               Eff.breaks=cut(EFFORT,breaks=50))
+  Sp.occ=d%>%group_by(SPECIES)%>%
+              summarise(Tot=sum(ktch))%>%
+              mutate(Occ=100*Tot/nrow(a))%>%
+              filter(Occ>1)%>%pull(SPECIES)
+  
+  b1=d%>%filter(SPECIES%in%Sp.occ)%>%
+    group_by(SHEET_NO,Eff.breaks)%>%
+    summarise(N.species=sum(ktch))
+  
+  boxplot(N.species~Eff.breaks,b1)
+  
+  #ACA: automate the extraction of the minimum effort
+  # Med=d%>%filter(SPECIES%in%Sp.occ)%>%
+  #         group_by(Eff.breaks)%>%
+  #         summarise(N.species=sum(ktch))
+  # 
+  # b2=b1%>%mutate(min=as.numeric(substr(Eff.breaks,2,3)))%>%
+  #   filter(N.species>kip)
+  # 
+  # min.effort=min(subset(b1,N.species>quantile(b1$N.species,probs=.6),select='min'))
+  
+  return(min.effort)
+  
+}
+#7.2.1 Monthly
+
+#7.2.2 Daily
+
+#remove records with too low effort
+Percen.occ=0
+Min.obs.effort=fn.min.obs.ef(d=Data.daily,subset.sp=Percen.occ)
+Data.daily=Data.daily%>%filter(EFFORT>=Min.obs.effort)
+
+
+#ACA implement PRIMER stuff....
+
+names(Data.daily)
+
+
+
 Predictors=c("YEAR","BLOCK","BOAT","MONTH")
 IDVAR=Predictors
 Prop.sp=table(d.anlsys$SPECIES)
