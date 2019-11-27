@@ -1993,12 +1993,13 @@ for(s in 1:length(STore.multi.var.observer))
   #7.2 Commercial
 fn.min.obs.ef=function(d,subset.sp)
 {
+  N.samples=length(unique(d$SHEET_NO))
   d=d%>%mutate(ktch=1,
                Eff.breaks=cut(EFFORT,breaks=50))
   Sp.occ=d%>%group_by(SPECIES)%>%
               summarise(Tot=sum(ktch))%>%
-              mutate(Occ=100*Tot/nrow(a))%>%
-              filter(Occ>1)%>%pull(SPECIES)
+              mutate(Occ=100*Tot/N.samples)%>%
+              filter(Occ>subset.sp)%>%pull(SPECIES)
   
   b1=d%>%filter(SPECIES%in%Sp.occ)%>%
     group_by(SHEET_NO,Eff.breaks)%>%
@@ -2006,26 +2007,21 @@ fn.min.obs.ef=function(d,subset.sp)
   
   boxplot(N.species~Eff.breaks,b1)
   
-  #ACA: automate the extraction of the minimum effort
-  # Med=d%>%filter(SPECIES%in%Sp.occ)%>%
-  #         group_by(Eff.breaks)%>%
-  #         summarise(N.species=sum(ktch))
-  # 
-  # b2=b1%>%mutate(min=as.numeric(substr(Eff.breaks,2,3)))%>%
-  #   filter(N.species>kip)
-  # 
-  # min.effort=min(subset(b1,N.species>quantile(b1$N.species,probs=.6),select='min'))
+  #ACA: Need to extract the min effort when it asymtotes.. can I automate this??
+    # min.effort=
   
   return(min.effort)
   
 }
-#7.2.1 Monthly
+Min.occ=0  #in 100%, if set to 0, then all species used
 
-#7.2.2 Daily
+    #7.2.1 Monthly                                    AM I USING MONTHLY????????????
 
-#remove records with too low effort
-Percen.occ=0
-Min.obs.effort=fn.min.obs.ef(d=Data.daily,subset.sp=Percen.occ)
+    #7.2.2 Daily
+Min.obs.effort=fn.min.obs.ef(d=Data.daily,subset.sp=Min.occ)
+
+#remove records with too low effort          #note: this should be move up front and    MISSING!!!!
+                                             # all analysis done on this data subset
 Data.daily=Data.daily%>%filter(EFFORT>=Min.obs.effort)
 
 
