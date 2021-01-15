@@ -18,6 +18,7 @@
 
 #missing: Commercial TDGDLF. Keep Monthly and Daily separate!!!
 #         Do Sections 3 to 6 and 7.1
+#         For PRIMER notes and recommendations, look in C:\Matias\Workshops\2019_Primer workshop\2019_PRIMER_workshop.docx
 
 rm(list=ls(all=TRUE))
 
