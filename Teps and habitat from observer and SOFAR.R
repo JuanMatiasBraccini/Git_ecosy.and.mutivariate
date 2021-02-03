@@ -4,6 +4,9 @@ library(RODBC)
 library(lunar)   #moon phases
 library(lubridate)
 library(tidyverse)
+library(reshape2)
+library(Hmisc)
+library(RColorBrewer)
 options(stringsAsFactors = FALSE)
 
 
@@ -110,17 +113,84 @@ Tab1=Scaled.obs%>%
 
 write.csv(Tab1,paste(hndl.teps,"Table_scaled.teps.observer_McAuley.Simp_2003.csv",sep=''),row.names=F)
 
+#Plots
+integer_breaks <- function(n = 5, ...) {
+  fxn <- function(x) {
+    breaks <- floor(pretty(x, n, ...))
+    names(breaks) <- attr(breaks, "labels")
+    breaks
+  }
+  return(fxn)
+}
+fn.plt=function(d,mammals,seabirds,reptiles,elasmos,out.file,Year.max)
+{
+  d <- d%>%
+    mutate(Year=as.numeric(substr(FINYEAR,1,4)))%>%
+    dplyr::select(-Annual.effort_km.gn.h,-FINYEAR)%>%
+    melt(id.vars="Year")%>%
+    mutate(variable=as.character(variable),
+           variable=case_when(variable=='Dolphin (bottlenose)'~'Bottlenose dolphin',
+                              variable=='Dolphin (common)'~'Common dolphin',
+                              variable=='Cormorants'~'Cormorant (unspecified)',
+                              TRUE ~ variable))%>%
+    mutate(group=case_when(variable%in%mammals~'Marine mammals',
+                           variable%in%seabirds~'Seabirds',
+                           variable%in%reptiles~'Reptiles',
+                           variable%in%elasmos~'Elasmobranchs'),
+           group=factor(group,levels=c('Elasmobranchs','Marine mammals','Reptiles','Seabirds')))%>%
+    filter(Year<=Year.max)
+  myColors <- brewer.pal(4, "Spectral")
+  names(myColors) <- levels(d$group)
+  
+  d%>%
+    ggplot(aes(Year,value, colour=group)) + 
+    geom_point(size=3) + 
+    facet_wrap(~variable,scales="free_y")+
+    xlab('Financial year')+ylab('Number of interactions')+ 
+    theme_bw() +
+    theme(panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          strip.background = element_blank(),
+          panel.border = element_rect(colour = "black", fill = NA),
+          strip.text = element_text(size = 17),
+          legend.title = element_blank(),
+          legend.text = element_text(size = 18),
+          legend.position="top",
+          axis.text=element_text(size=15),
+          axis.title=element_text(size=20),
+          plot.margin=unit(c(.1,.5,.1,.1),"cm"))+
+    scale_colour_manual(name = "group", values = myColors)+
+    scale_y_continuous(breaks = integer_breaks())
+  ggsave(paste(hndl.teps,out.file,sep=''),width = 10,height = 10,compression = "lzw")
+  
+}
+fn.plt(d=Tab1,
+       mammals=c("Bottlenose dolphin","Common dolphin","Dolphin (unspecified)","Sea Lion","Seal"),
+       seabirds=c("Cormorant (unspecified)","Fairy penguin","Mutton bird"),
+       reptiles=c("Turtle (unspecified)"),
+       elasmos=NA,
+       out.file="Plot_scaled.teps.observer_McAuley.Simp_2003.tiff",
+       Year.max=2019)
 
 
+  
 # TEPS_SOFAR records -----------------------------------------------------------------------
 SOFAR.TEPS=SOFAR.TEPS%>%
   mutate(CommonName=case_when(SpeciesCode==40041050 ~'Mutton bird',
                               SpeciesCode==37010003 ~ "Shark, white",
-                              SpeciesCode==37035000 ~ "Manta Rays",
+                              SpeciesCode==37035000 | CommonName%in%c('Manta Rays','Ray, Manta') ~ "Manta rays",
                               TRUE ~ CommonName))%>%
-  filter(!SpeciesCode%in%c(37020000,37018001,37018003,37018022,37038000,37990030))
+  filter(!SpeciesCode%in%c(37020000,37018001,37018003,37018022,37038000,37990030))%>%
+  mutate(CommonName=capitalize(tolower(CommonName)),
+         CommonName=case_when(CommonName=='New zealand fur-seal'~'NZ fur-seal',
+                              CommonName=='Shark, grey nurse'~'Grey nurse shark',
+                              CommonName=='Shark, white'~'White shark',
+                              CommonName=='Snake, sea'~'Sea snakes',
+                              TRUE ~ CommonName))
+
 sofar.tep.names=SOFAR.TEPS%>%distinct(SpeciesCode,.keep_all = T)%>%
   dplyr::select(SpeciesCode,CommonName,RSCommonName)
+
 sofar.CategoryName=SOFAR.TEPS%>%distinct(SpeciesCode,.keep_all = T)%>%
   dplyr::select(CommonName,CategoryName)
 
@@ -140,7 +210,21 @@ Table.sofar.teps=Table.sofar.teps%>%
   dplyr::select(-CategoryName)
 write.csv(Table.sofar.teps,paste(hndl.teps,"Table_SOFAR.csv",sep=''),row.names=F)
 
+dd=Table.sofar.teps%>%
+      melt(id.vars="CommonName")%>%
+      mutate(value=as.numeric(value),
+             FINYEAR=substr(variable,1,7))%>%
+      group_by(CommonName,FINYEAR)%>%
+      summarise(value=sum(value,na.rm=T))%>%
+      spread(CommonName,value)%>%
+      mutate(Annual.effort_km.gn.h=NA)
 
-# Habitat_get habitat records from Shark survey boat header -----------------------------------------------------------------------
-Habitat.in.GN.boat.header=GN_hdr%>%
-  filter(grepl(paste(search.habitat, collapse="|"), COMMENTS))
+
+fn.plt(d=dd,
+       mammals=c("Dolphins","NZ fur-seal","Sea lions","Seals","Whales"),
+       seabirds=c("Mutton bird","Sea birds"),
+       reptiles=c("Sea snakes","Turtles"),
+       elasmos=c("Grey nurse shark","Manta rays","Sawfish","White shark"),
+       out.file="Plot_SOFAR.tiff",
+       Year.max=2019)
+
