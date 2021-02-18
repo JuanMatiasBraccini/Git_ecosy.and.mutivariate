@@ -122,7 +122,7 @@ integer_breaks <- function(n = 5, ...) {
   }
   return(fxn)
 }
-fn.plt=function(d,mammals,seabirds,reptiles,elasmos,out.file,Year.max)
+fn.plt=function(d,mammals,seabirds,reptiles,elasmos,out.file,Year.max,TITLY)
 {
   d <- d%>%
     mutate(Year=as.numeric(substr(FINYEAR,1,4)))%>%
@@ -144,9 +144,9 @@ fn.plt=function(d,mammals,seabirds,reptiles,elasmos,out.file,Year.max)
   
   d%>%
     ggplot(aes(Year,value, colour=group)) + 
-    geom_point(size=3) + 
+    geom_point(size=2) + 
     facet_wrap(~variable,scales="free_y")+
-    xlab('Financial year')+ylab('Number of interactions')+ 
+    xlab('Financial year')+ylab(TITLY)+ 
     theme_bw() +
     theme(panel.grid.major = element_blank(),
           panel.grid.minor = element_blank(),
@@ -170,7 +170,8 @@ fn.plt(d=Tab1,
        reptiles=c("Turtle (unspecified)"),
        elasmos=NA,
        out.file="Plot_scaled.teps.observer_McAuley.Simp_2003.tiff",
-       Year.max=2019)
+       Year.max=2019,
+       TITLY='Number of estimated interactions')
 
 
   
@@ -219,12 +220,111 @@ dd=Table.sofar.teps%>%
       spread(CommonName,value)%>%
       mutate(Annual.effort_km.gn.h=NA)
 
+dd.A=Table.sofar.teps[,c(1,grep(" A",colnames(Table.sofar.teps)))]%>%
+      melt(id.vars="CommonName")%>%
+      mutate(value=as.numeric(value),
+             FINYEAR=substr(variable,1,7))%>%
+      group_by(CommonName,FINYEAR)%>%
+      summarise(value=sum(value,na.rm=T))%>%
+      spread(CommonName,value)%>%
+      mutate(Annual.effort_km.gn.h=NA)
 
-fn.plt(d=dd,
-       mammals=c("Dolphins","NZ fur-seal","Sea lions","Seals","Whales"),
-       seabirds=c("Mutton bird","Sea birds"),
-       reptiles=c("Sea snakes","Turtles"),
-       elasmos=c("Grey nurse shark","Manta rays","Sawfish","White shark"),
-       out.file="Plot_SOFAR.tiff",
-       Year.max=2019)
+dd.D=Table.sofar.teps[,c(1,grep(" D",colnames(Table.sofar.teps)))]%>%
+      melt(id.vars="CommonName")%>%
+      mutate(value=as.numeric(value),
+             FINYEAR=substr(variable,1,7))%>%
+      group_by(CommonName,FINYEAR)%>%
+      summarise(value=sum(value,na.rm=T))%>%
+      spread(CommonName,value)%>%
+      mutate(Annual.effort_km.gn.h=NA)
+
+fn.plt.SOFAAR=function(d,d.A,d.D,mammals,seabirds,reptiles,elasmos,out.file,Year.max,TITLY)
+{
+  d <- d%>%
+    mutate(Year=as.numeric(substr(FINYEAR,1,4)))%>%
+    dplyr::select(-Annual.effort_km.gn.h,-FINYEAR)%>%
+    melt(id.vars="Year")%>%
+    mutate(variable=as.character(variable),
+           variable=case_when(variable=='Dolphin (bottlenose)'~'Bottlenose dolphin',
+                              variable=='Dolphin (common)'~'Common dolphin',
+                              variable=='Cormorants'~'Cormorant (unspecified)',
+                              TRUE ~ variable))%>%
+    mutate(group=case_when(variable%in%mammals~'Marine mammals',
+                           variable%in%seabirds~'Seabirds',
+                           variable%in%reptiles~'Reptiles',
+                           variable%in%elasmos~'Elasmobranchs'),
+           group=factor(group,levels=c('Elasmobranchs','Marine mammals','Reptiles','Seabirds')))%>%
+    filter(Year<=Year.max)
+  
+  d.A <- d.A%>%
+    mutate(Year=as.numeric(substr(FINYEAR,1,4)))%>%
+    dplyr::select(-Annual.effort_km.gn.h,-FINYEAR)%>%
+    melt(id.vars="Year")%>%
+    mutate(variable=as.character(variable),
+           variable=case_when(variable=='Dolphin (bottlenose)'~'Bottlenose dolphin',
+                              variable=='Dolphin (common)'~'Common dolphin',
+                              variable=='Cormorants'~'Cormorant (unspecified)',
+                              TRUE ~ variable))%>%
+    mutate(group=case_when(variable%in%mammals~'Marine mammals',
+                           variable%in%seabirds~'Seabirds',
+                           variable%in%reptiles~'Reptiles',
+                           variable%in%elasmos~'Elasmobranchs'),
+           group=factor(group,levels=c('Elasmobranchs','Marine mammals','Reptiles','Seabirds')))%>%
+    filter(Year<=Year.max)
+
+  d.D <- d.D%>%
+    mutate(Year=as.numeric(substr(FINYEAR,1,4)))%>%
+    dplyr::select(-Annual.effort_km.gn.h,-FINYEAR)%>%
+    melt(id.vars="Year")%>%
+    mutate(variable=as.character(variable),
+           variable=case_when(variable=='Dolphin (bottlenose)'~'Bottlenose dolphin',
+                              variable=='Dolphin (common)'~'Common dolphin',
+                              variable=='Cormorants'~'Cormorant (unspecified)',
+                              TRUE ~ variable))%>%
+    mutate(group=case_when(variable%in%mammals~'Marine mammals',
+                           variable%in%seabirds~'Seabirds',
+                           variable%in%reptiles~'Reptiles',
+                           variable%in%elasmos~'Elasmobranchs'),
+           group=factor(group,levels=c('Elasmobranchs','Marine mammals','Reptiles','Seabirds')))%>%
+    filter(Year<=Year.max)
+  
+  myColors <- brewer.pal(4, "Spectral")
+  names(myColors) <- levels(d$group)
+  
+
+  d%>%
+    ggplot(aes(Year,value, colour=group)) + 
+    geom_line(size=1) + 
+    geom_point(data=d.A,size=2.5,shape = 21,fill="white") +
+    geom_point(data=d.D,size=2.5,shape = 19) +
+    facet_wrap(~variable,scales="free_y")+
+    xlab('Financial year')+ylab(TITLY)+ 
+    theme_bw() +
+    theme(panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          strip.background = element_blank(),
+          panel.border = element_rect(colour = "black", fill = NA),
+          strip.text = element_text(size = 17),
+          legend.title = element_blank(),
+          legend.text = element_text(size = 18),
+          legend.position="top",
+          axis.text=element_text(size=15),
+          axis.title=element_text(size=20),
+          plot.margin=unit(c(.1,.5,.1,.1),"cm"))+
+    scale_colour_manual(name = "group", values = myColors)+
+    scale_y_continuous(breaks = integer_breaks()) 
+  ggsave(paste(hndl.teps,out.file,sep=''),width = 10,height = 10,compression = "lzw")
+  
+}
+
+fn.plt.SOFAAR(d=dd,
+              d.A=dd.A,
+              d.D=dd.D,
+              mammals=c("Dolphins","NZ fur-seal","Sea lions","Seals","Whales"),
+              seabirds=c("Mutton bird","Sea birds"),
+              reptiles=c("Sea snakes","Turtles"),
+              elasmos=c("Grey nurse shark","Manta rays","Sawfish","White shark"),
+              out.file="Plot_SOFAR.tiff",
+              Year.max=2019,
+              TITLY='Number of reported interactions')
 
