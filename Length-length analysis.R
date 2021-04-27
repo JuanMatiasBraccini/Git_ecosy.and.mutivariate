@@ -2,17 +2,18 @@
 ############################
 #LENGTH-LENGTH RELATIONSHIP#
 ############################
+handl_OneDrive=function(x)paste('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias',x,sep='/')
 
 #Define working directory
 #Define user
 User="Matias"
 #User="Agustin"
 
-if(User=="Matias")setwd("C:/Matias/Analyses/Ecosystem indices/Shark-bycatch")
-if(User=="Agustin")setwd("C:/Users/Agustín/OneDrive/Research/2016/2. Length-length")
+if(User=="Matias")setwd(handl_OneDrive("Analyses/Ecosystem indices/Shark-bycatch"))
+if(User=="Agustin")setwd("C:/Users/Agust?n/OneDrive/Research/2016/2. Length-length")
 
 #Source functions
-if(User=="Matias")source("C:/Matias/Analyses/Ecosystem indices/Shark-bycatch/Git_bycatch_TDGDLF/Length-length functions.R")
+if(User=="Matias")source(handl_OneDrive("Analyses/Ecosystem indices/Shark-bycatch/Git_bycatch_TDGDLF/Length-length functions.R"))
 if(User=="Agustin")source("Length-length functions.R")
 
 

@@ -59,9 +59,9 @@ library(gridBase)			#for inset map
 
 library(plyr)				#for weighted mean aggregation
 
+handl_OneDrive=function(x)paste('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias',x,sep='/')
 
-
-setwd("C:/Matias/Data/Shark survey/2007-2008")
+setwd(handl_OneDrive("Data/Shark survey/2007-2008"))
 #setwd("F:/BackUps/Matias_1_12/Data/Shark survey/2007-2008")
 
 
@@ -78,14 +78,14 @@ F1_SamplingTwo_08<- sqlFetch(channel7,"F1_SamplingTwo")
 F3_Sampling_08<- sqlFetch(channel7,"F3_Sampling")
 close(channel7) 
 
-Sites=read.csv("C:/Matias/Analysis/ArcView/Shark survey 2007-2008/Sites.csv",sep=',')
+Sites=read.csv(handl_OneDrive("Analysis/ArcView/Shark survey 2007-2008/Sites.csv",sep=','))
 #Sites=read.csv("F:/BackUps/Matias_1_12/Analysis/ArcView/Shark survey 2007-2008/Sites.csv",sep=',')
 
 
 #Bathymetry data
-Bathymetry_1=read.table("C:/Matias/Analysis/Post capture mortality/get_data_114_130.cgi")
-Bathymetry_2=read.table("C:/Matias/Analysis/Post capture mortality/get_data_130_140.cgi")
-Bathymetry_3=read.table("C:/Matias/Analysis/Post capture mortality/get_data_140_151.cgi")
+Bathymetry_1=read.table(handl_OneDrive("Analysis/Post capture mortality/get_data_114_130.cgi"))
+Bathymetry_2=read.table(handl_OneDrive("Analysis/Post capture mortality/get_data_130_140.cgi"))
+Bathymetry_3=read.table(handl_OneDrive("Analysis/Post capture mortality/get_data_140_151.cgi"))
 
 # Bathymetry_1=read.table("F:/BackUps/Matias_1_12/Analysis/Post capture mortality/get_data_114_130.cgi")
 # Bathymetry_2=read.table("F:/BackUps/Matias_1_12/Analysis/Post capture mortality/get_data_130_140.cgi")
@@ -236,8 +236,8 @@ text(153.45,-42.625,("100 km"),col="black", cex=1.25)
 text(131.3,-30.5,("Head of the"),col="black", cex=1.5)
 text(131.6,-31.1,("Great Australian Bight"),col="black", cex=1.5)
 text(145.7,-39.8,("Bass Strait"),col="black", cex=1.5)
-mtext("Latitude (ºS)",side=2,outer=T,line=2.5,font=1,las=0,cex=1.5)
-mtext("Longitude (ºE)",side=1,outer=T,line=-8,font=1,las=1,cex=1.5)
+mtext("Latitude (?S)",side=2,outer=T,line=2.5,font=1,las=0,cex=1.5)
+mtext("Longitude (?E)",side=1,outer=T,line=-8,font=1,las=1,cex=1.5)
 axis(2,at=seq(-42,-32,2),labels=rev(seq(32,42,2)),cex.axis=1.5)
 axis(1,at=seq(128,154,2),labels=T,cex.axis=1.5)
 box()

@@ -3,13 +3,13 @@ library(tidyverse)
 
 
 #----DATA SECTION----
-
+handl_OneDrive=function(x)paste('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias',x,sep='/')
 
 #Commercial catch and effort TDGDLF
-Data.monthly=read.csv("C:/Matias/Analyses/Data_outs/Data.monthly.csv",stringsAsFactors=F)
-Data.daily=read.csv("C:/Matias/Analyses/Data_outs/Data.daily.csv",stringsAsFactors=F)
-Effort.monthly=read.csv("C:/Matias/Analyses/Data_outs/Effort.monthly.csv",stringsAsFactors=F)
-Effort.daily=read.csv("C:/Matias/Analyses/Data_outs/Effort.daily.csv",stringsAsFactors=F)
+Data.monthly=read.csv(handl_OneDrive("Analyses/Data_outs/Data.monthly.csv"),stringsAsFactors=F)
+Data.daily=read.csv(handl_OneDrive("Analyses/Data_outs/Data.daily.csv"),stringsAsFactors=F)
+Effort.monthly=read.csv(handl_OneDrive("Analyses/Data_outs/Effort.monthly.csv"),stringsAsFactors=F)
+Effort.daily=read.csv(handl_OneDrive("Analyses/Data_outs/Effort.daily.csv"),stringsAsFactors=F)
 
 
 

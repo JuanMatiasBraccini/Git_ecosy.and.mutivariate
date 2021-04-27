@@ -8,7 +8,8 @@ library("readxl")
 # Data section ------------------------------------------------------------
 
 #SSF 2007-08
-setwd('C:/Matias/Data/SSF_survey_07_08')
+handl_OneDrive=function(x)paste('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias',x,sep='/')
+setwd(handl_OneDrive('Data/SSF_survey_07_08'))
 F1_Sampling <- read_excel("SharkSurveyData_30_09_2008.xls", sheet = "F1_Sampling")
 F1_SamplingTwo <- read_excel("SharkSurveyData_30_09_2008.xls", sheet = "F1_SamplingTwo")
 F3_Sampling <- read_excel("SharkSurveyData_30_09_2008.xls", sheet = "F3_Sampling")

@@ -2,7 +2,9 @@
 
 library(RODBC)  			#include ODBC library for importing Acccess data
 
-setwd("C:/Matias/Data/Shark survey/2007-2008")
+handl_OneDrive=function(x)paste('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias',x,sep='/')
+
+setwd(handl_OneDrive("Data/Shark survey/2007-2008"))
 channel <- odbcConnectExcel("SharkSurveyData_30_09_2008")
 Net_specs<- sqlFetch(channel,"Net_specification")
 F1_Sampling<- sqlFetch(channel,"F1_Sampling")
@@ -68,6 +70,6 @@ DATA_TEPS_MAFFRI=merge(TEPS,F1_Sampling,by=c("Dummy","Cruise","Station","Mesh"),
 
 
 #export data to match WA format
-setwd("C:/Matias/Analyses/Bycatch")
+setwd(handl_OneDrive("Analyses/Bycatch"))
 write.csv(DATA_MAFFRI,"MAFFRI_data.csv",row.names=F)
 write.csv(DATA_TEPS_MAFFRI,"MAFFRI_TEPS_data.csv",row.names=F)

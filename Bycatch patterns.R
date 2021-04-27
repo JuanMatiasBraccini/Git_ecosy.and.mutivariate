@@ -41,29 +41,31 @@ library(data.table)
 library(tidyverse)
 
 #Define working directory
-setwd("C:/Matias/Analyses/Ecosystem indices and multivariate/Shark-bycatch")
+handl_OneDrive=function(x)paste('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias',x,sep='/')
+
+setwd(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch"))
 User="Matias"
 
 #Source functions
-source("C:/Matias/Analyses/Ecosystem indices and multivariate/Git_ecosy.and.mutivariate/Ecosystem_functions.R")
+source(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Git_ecosy.and.mutivariate/Ecosystem_functions.R"))
 
 
 #choose if doing .jpeg or .tiff figures
 Do.jpeg="YES"
 Do.tiff="NO"
-source("C:/Matias/Analyses/SOURCE_SCRIPTS/Git_other/Smart_par.R")
+source(handl_OneDrive("Analyses/SOURCE_SCRIPTS/Git_other/Smart_par.R"))
 
 
 # 1 Data section-----------------------------------------------------------------------
 
 # 1. Bring in WA shark observer data
-source("C:/Matias/Analyses/SOURCE_SCRIPTS/Git_other/Source_Shark_bio.R")
+source(handl_OneDrive("Analyses/SOURCE_SCRIPTS/Git_other/Source_Shark_bio.R"))
 rm(DATA)
 DATA=DATA.ecosystems
 
 
 # 2. Bring in WA Species names + PCS + FATE
-setwd("C:/Matias/Analyses/Ecosystem indices and multivariate/Shark-bycatch")
+setwd(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch"))
 SPECIES_PCS_FATE=read.csv("SPECIES+PCS+FATE.csv",stringsAsFactors=F)
 SPECIES_PCS_FATE_Com=read.csv("SPECIES+PCS+FATE_Com.csv",stringsAsFactors=F)
 
@@ -72,7 +74,7 @@ Len.cof=read.csv("Raw coefficents table.csv")
 
 
 #4. Bring in Commercial data
-source("C:/Matias/Analyses/Ecosystem indices and multivariate/Git_ecosy.and.mutivariate/Commercial_data_for_Ecosystem_Analysis.R")
+source(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Git_ecosy.and.mutivariate/Commercial_data_for_Ecosystem_Analysis.R"))
 
 
 
@@ -1952,7 +1954,7 @@ dev.off()
 
 #ACA
 # 7 Multivariate analysis-----------------------------------------------------------------------
-source("C:/Matias/Analyses/SOURCE_SCRIPTS/Git_other/Multivariate_statistics.R")
+source(handl_OneDrive("Analyses/SOURCE_SCRIPTS/Git_other/Multivariate_statistics.R"))
 
   #7.1  Observer data
 DataSets=c("proportion")   #response variables
@@ -1978,7 +1980,7 @@ STore.multi.var.observer=Multivar.fn(DATA=Numbers.block.year.mn.vesl,ResVar=ResV
                                    Predictors=Predictors,IDVAR=IDVAR,
                                    Formula=formula("d.res.var~."),DataSets=DataSets)
 
-Hndl="C:/Matias/Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate"
+Hndl=handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate")
 for(s in 1:length(STore.multi.var.observer)) 
 {
   with(STore.multi.var.observer[[s]],
