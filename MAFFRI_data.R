@@ -2,7 +2,7 @@
 
 library(RODBC)  			#include ODBC library for importing Acccess data
 
-handl_OneDrive=function(x)paste('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias',x,sep='/')
+if(!exists('handl_OneDrive')) source('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias/Analyses/SOURCE_SCRIPTS/Git_other/handl_OneDrive.R')
 
 setwd(handl_OneDrive("Data/Shark survey/2007-2008"))
 channel <- odbcConnectExcel("SharkSurveyData_30_09_2008")
