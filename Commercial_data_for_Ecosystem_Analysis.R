@@ -85,5 +85,5 @@ Data.daily=Data.daily%>%
 
 #Remove nonsense catches (either too small or too large)
 Data.monthly=Data.monthly%>%filter(LIVEWT.c>1 & LIVEWT.c<25000)    
-Data.daily=Data.daily%>%filter(LIVEWT.c>.1 & LIVEWT.c<3000)  
+Data.daily=Data.daily%>%filter(LIVEWT.c>.1 & LIVEWT.c<8000)  
 
