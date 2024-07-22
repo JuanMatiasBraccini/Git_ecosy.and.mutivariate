@@ -36,7 +36,7 @@ library(reshape2)
 library(ggplot2)
 library(caret)      #for all things data mining
 library(plotrix)
-library(ReporteRs)
+#library(ReporteRs)
 library(mvtnorm)      #for multivariate normal pdf
 library(lme4) #mixed models
 library(MuMIn)  #model selection and pseudoR2 mixed effect models
@@ -44,6 +44,7 @@ library(car)    #to get ANOVA from lmer model
 library(data.table)
 library(tidyverse)
 library(Hmisc)
+library(tictoc)
 
 #Define working directory
 if(!exists('handl_OneDrive')) source('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias/Analyses/SOURCE_SCRIPTS/Git_other/handl_OneDrive.R')
@@ -58,13 +59,27 @@ User="Matias"
 source(handl_OneDrive("Analyses/SOURCE_SCRIPTS/Git_other/Source_Shark_bio.R"))
 rm(DATA)
 DATA=DATA.ecosystems%>%
-      filter(!COMMON_NAME%in%c('Unidentified','','Other sharks'))
+      filter(!COMMON_NAME%in%c('Unidentified','','Other sharks'))%>%
+  mutate(SCIENTIFIC_NAME=str_remove(SCIENTIFIC_NAME,paste(c("Families ","Family "),collapse='|')))
 
 
 # 2. Bring in WA Species names-PCS-FATE
 setwd(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch"))
 SPECIES_PCS_FATE=read.csv("SPECIES+PCS+FATE.csv",stringsAsFactors=F)
 SPECIES_PCS_FATE_Com=read.csv("SPECIES+PCS+FATE_Com.csv",stringsAsFactors=F)
+Functional.traits=read.csv("Functional.traits.csv",stringsAsFactors=F)  #from FishBase get.fishbase.traits.R
+
+SPECIES_PCS_FATE=left_join(SPECIES_PCS_FATE,
+                               Functional.traits%>%
+                                 dplyr::select(-SCIENTIFIC_NAME)%>%
+                                 rename(SCIENTIFIC_NAME=SCIENTIFIC_NAME.original),
+                               by=c('SCIENTIFIC_NAME'))
+
+SPECIES_PCS_FATE_Com=left_join(SPECIES_PCS_FATE_Com,
+                               Functional.traits%>%
+                                 dplyr::select(-SCIENTIFIC_NAME)%>%
+                                 rename(SCIENTIFIC_NAME=SCIENTIFIC_NAME.original),
+                               by=c('SCIENTIFIC_NAME'))
 
 # 3. Bring in Length coefficients
 Len.cof=read.csv("Raw coefficents table.csv")
@@ -91,15 +106,23 @@ Min.shts=5 #USe records with at least 5 shots per year-block
 Min.shts.sens=c(Min.shts*2)
 Min.recs=10        #minimum number of records per boat to be selected
 Min.individuals=5   #minimum number of individuals per shot to use
+Min.shots.year=50  #minimum number of shots per year
+Min.years=3        #minimum number of years with Min.shots.year
 
   #vessel used as mixed effect
-MixedEff="BOAT"   
+MixedEff="BOAT" 
+
+# define if looking at landed and discarded separate
+check.discards=FALSE
 
   #choose if using commercial data
 do.commercial=TRUE
 combine.daily.monthly=TRUE
+use.NSF=TRUE
 get.traits=FALSE  #get life history traits from FishLife
-Start.yr=1975   #before 1989 some species not reported in commercial logbooks. Interpret results within this caveat
+Start.yr=1975   #before 1989 some species not reported in commercial logbooks; also some species become protected. Interpret results within this caveat
+protected.species=c(8001,10003) 
+names(protected.species)=c("greynurse shark","white shark")
 
   #choose if doing data exploration
 do.exploratory="NO"  
@@ -115,10 +138,12 @@ ResVar="INDIVIDUALS"
 MultiVar="SPECIES"
 IDVAR=c("SHEET_NO","YEAR","MONTH","BOTDEPTH","BLOCK","ZONE","BOAT","SKIPPER","MESH_SIZE",
         "BIOREGION","SEASON","EFFORT","LATITUDE","LONGITUDE")   
-Predictors=c("YEAR","BLOCK","BOAT","MONTH","BOTDEPTH","LATITUDE","LONGITUDE")
+Predictors=c("YEAR","BOAT","MONTH","BOTDEPTH","LATITUDE","LONGITUDE") #"BLOCK"
 Expl.varS=c("YEAR","BOAT","MONTH","BLOCK","BOTDEPTH","LATITUDE","LONGITUDE")
-FactoRS=Expl.varS[-match(c("BOTDEPTH","LATITUDE","LONGITUDE"),Expl.varS)]
+FactoRS=Expl.varS[-match(c("BOTDEPTH","LATITUDE","LONGITUDE","MONTH"),Expl.varS)]
 OFFSETT=NA
+
+response.var='cpue'  #use catch rates to calculate indicators
 
   #choose indicators 
 Ecol.Indicators=c("Shannon","Pielou","Simpson","MTL","MML","MeanML","Prop.Disc")
@@ -126,26 +151,43 @@ Ecol.Indicators=c("Shannon","Pielou","Simpson","MTL","MML","MeanML","Prop.Disc")
 #                                               then FIB is <0)
 traits=c("MaxAge","Age.mat.prop","K","MaxLen")
 
+Functional.diversity=c("FnRich_morph","FnRich_ecol")
+traits_ecol=c('Trophic.level.fishbase','Habitat','Movement.scale','Feeding.group')  
+traits_morph=c('Body.shape','Maximum.size','Body.depth','Head.length','Eye.diameter','Pre.orbital.length')
 
 
 # 3 Procedure section-----------------------------------------------------------------------
 
-#3.1. Manipulate trophic levels
+#3.1. Remove protected species from commercial catch
+if(!is.null(protected.species))
+{
+  Data.daily=Data.daily%>%filter(!SPECIES%in%protected.species)
+  Data.daily.north=Data.daily.north%>%filter(!SPECIES%in%protected.species)
+  Data.monthly=Data.monthly%>%filter(!SPECIES%in%protected.species)
+  Data.monthly.north=Data.monthly.north%>%filter(!SPECIES%in%protected.species)
+}
+
+
+#3.2. Manipulate trophic levels
   #add SD from FishBase to Cortes'; use FishBase for Teleosts
-SPECIES_PCS_FATE$TL_SD=with(SPECIES_PCS_FATE,ifelse(is.na(TL_SD)& NATURE%in%c("T"),TL_SD2,
-            ifelse(is.na(TL_SD)& NATURE%in%c("S","R"),TROPHIC_LEVEL*TL_SD2/TROPHIC_LEVEL2,
-            TL_SD)))
-SPECIES_PCS_FATE$TROPHIC_LEVEL=with(SPECIES_PCS_FATE,
-            ifelse(is.na(TROPHIC_LEVEL),TROPHIC_LEVEL2,TROPHIC_LEVEL))
-SPECIES_PCS_FATE_Com$TL_SD=with(SPECIES_PCS_FATE_Com,ifelse(is.na(TL_SD)& NATURE%in%c("T"),TL_SD2,
-            ifelse(is.na(TL_SD)& NATURE%in%c("S","R"),TROPHIC_LEVEL*TL_SD2/TROPHIC_LEVEL2,
-            TL_SD)))            
-SPECIES_PCS_FATE_Com$TROPHIC_LEVEL=with(SPECIES_PCS_FATE_Com,
-            ifelse(is.na(TROPHIC_LEVEL),TROPHIC_LEVEL2,TROPHIC_LEVEL))
+SPECIES_PCS_FATE=SPECIES_PCS_FATE%>%
+  mutate(TL_SD=ifelse(is.na(TL_SD)& NATURE%in%c("T"),TL_SD2,
+               ifelse(is.na(TL_SD)& NATURE%in%c("S","R"),TROPHIC_LEVEL*TL_SD2/TROPHIC_LEVEL2,
+                      TL_SD)),
+         TROPHIC_LEVEL=ifelse(is.na(TROPHIC_LEVEL),TROPHIC_LEVEL2,TROPHIC_LEVEL),
+         Trophic.level=ifelse(!is.na(TROPHIC_LEVEL),TROPHIC_LEVEL,Trophic.level))%>%
+  rename(Trophic.level.fishbase=Trophic.level)
+
+SPECIES_PCS_FATE_Com=SPECIES_PCS_FATE_Com%>%
+        mutate(TL_SD=ifelse(is.na(TL_SD)& NATURE%in%c("T"),TL_SD2,
+                            ifelse(is.na(TL_SD)& NATURE%in%c("S","R"),TROPHIC_LEVEL*TL_SD2/TROPHIC_LEVEL2,
+                                   TL_SD)),
+               TROPHIC_LEVEL=ifelse(is.na(TROPHIC_LEVEL),TROPHIC_LEVEL2,TROPHIC_LEVEL),
+               Trophic.level=ifelse(!is.na(TROPHIC_LEVEL),TROPHIC_LEVEL,Trophic.level))%>%
+        rename(Trophic.level.fishbase=Trophic.level)
 
 
-
-#3.2. Manipulated WA shark observer data
+#3.3. Manipulate WA shark observer data
 
   #Extract year and month
 DATA$DATE=as.Date(DATA$date,format="%d/%m/%Y")
@@ -155,23 +197,47 @@ DATA$MONTH=as.numeric(strftime(DATA$DATE, format="%m"))
   #Fix method and mesh size issues
 DATA$Method=with(DATA,ifelse(is.na(Method) & BOAT%in%c("B67","F244","F517","E35"),"GN",Method))
 DATA$MESH_SIZE=with(DATA,ifelse(is.na(MESH_SIZE) & BOAT=="B67" & YEAR>1997,"7",
-                                ifelse(is.na(MESH_SIZE) & BOAT=="F517" & YEAR>2002,"7",MESH_SIZE)))
+                         ifelse(is.na(MESH_SIZE) & BOAT=="F517" & YEAR>2002,"7",MESH_SIZE)))
 
-  #Select commercial gillnet and mesh size
-DATA=subset(DATA,Method=="GN" & MESH_SIZE%in%c("6","6.5","7"))     
+  #Select relevant gear 
+used.gear='GN'
+if(use.NSF) used.gear=c(used.gear,'LL')
+DATA=subset(DATA,Method%in%used.gear) 
+DATA=DATA%>%
+       mutate(keep=ifelse(Method=='LL'| (Method=='GN' & MESH_SIZE%in%c("6","6.5","7")) ,'yes','no'))%>%
+  filter(keep=='yes')%>%
+  dplyr::select(-keep)
+  
+  
 Research.vess=c("HAM","HOU","RV GANNET","RV BREAKSEA","NATT","NAT","FLIN","RV SNIPE 2")
 DATA=subset(DATA,!BOAT%in%Research.vess)
 ALL.yrs=sort(as.numeric(unique(DATA$YEAR)))
 
   #Get latitude and longitude from de first end of the net for location
-DATA$LATITUDE=as.numeric(paste(DATA$END1LATD,".",ifelse(trunc(DATA$END1LATM*100/60)>=10,
-                                                        paste(substr(DATA$END1LATM*100/60,1,2),substr(DATA$END1LATM*100/60,4,5),sep=""),
-                                                        paste(0,substr(DATA$END1LATM*100/60,1,1),substr(DATA$END1LATM*100/60,3,4),sep="")),sep=""))
-DATA$LONGITUDE=as.numeric(paste(DATA$END1LNGD,".",ifelse(trunc(DATA$END1LNGM*100/60)>=10,
-                                                         paste(substr(DATA$END1LNGM*100/60,1,2),substr(DATA$END1LNGM*100/60,4,5),sep=""),
-                                                         paste(0,substr(DATA$END1LNGM*100/60,1,1),substr(DATA$END1LNGM*100/60,3,4),sep="")),sep=""))
+DATA=DATA%>%
+  mutate(LATITUDE=as.numeric(paste(END1LATD,".",
+                                    ifelse(trunc(END1LATM*100/60)>=10,
+                                               paste(substr(END1LATM*100/60,1,2),substr(END1LATM*100/60,4,5),sep=""),
+                                               paste(0,substr(END1LATM*100/60,1,1),substr(END1LATM*100/60,3,4),sep="")),sep="")),
+         LATITUDE=ifelse(is.na(LATITUDE),Mid.Lat,LATITUDE),
+         LATITUDE=ifelse(SHEET_NO=='R00384',Mid.Lat,LATITUDE))
+
+DATA=DATA%>%
+  mutate(LONGITUDE=as.numeric(paste(END1LNGD,".",
+                                     ifelse(trunc(END1LNGM*100/60)>=10,
+                                             paste(substr(END1LNGM*100/60,1,2),substr(END1LNGM*100/60,4,5),sep=""),
+                                            paste(0,substr(END1LNGM*100/60,1,1),substr(END1LNGM*100/60,3,4),sep="")),sep="")),
+         LONGITUDE=ifelse(is.na(LONGITUDE),Mid.Long,LONGITUDE))
+
   #Data range
-DATA=subset(DATA, LATITUDE<(-26) | LATITUDE==0) #zero to include the dodgy sheet numbers F00001, F00002 and F00003 with zero position
+if(!use.NSF) DATA=subset(DATA, LATITUDE<(-26) | LATITUDE==0) #zero to include the dodgy sheet numbers F00001, F00002 and F00003 with zero position
+
+  #Identify fishery
+DATA=DATA%>%mutate(Fishery=ifelse(LATITUDE>(-26),'NSF','TDGDLF'),
+                   Fishery=ifelse(LATITUDE==0,'TDGDLF',Fishery),
+                   Keep=ifelse((Fishery=='NSF' & Method=='LL') | (Fishery=='TDGDLF' & Method=='GN'),'Yes','No'))%>%
+            filter(Keep=='Yes')%>%
+            dplyr::select(-Keep)
 
   #Fix sex
 DATA$SEX=as.character(DATA$SEX)
@@ -182,7 +248,7 @@ Comments=subset(DATA,select=c(SHEET_NO,COMMENTS.hdr))
 Comments=Comments[!is.na(Comments$COMMENTS.hdr),]
 Comments=Comments[!duplicated(Comments$SHEET_NO),]
 
-  #Add common and scientific names, nature, fate, PCS and trophic level  
+  #Add nature, fate, PCS and trophic level  
 DATA=DATA%>%
   left_join(SPECIES_PCS_FATE%>%
             filter(SPECIES%in%unique(DATA$SPECIES))%>%
@@ -190,15 +256,20 @@ DATA=DATA%>%
             by="SPECIES")
 
   #Special treatment for White shark (WP) and Grey nurse shark (GN) as they became protected throughout the period
-DATA$FATE=ifelse(DATA$SPECIES=="WP",ifelse(DATA$YEAR<1997,"C","D"), 
-            ifelse(DATA$SPECIES=="GN",ifelse(DATA$YEAR<2001,"C","D"),as.character(DATA$FATE)))
-              
-DATA$NATURE=ifelse(DATA$SPECIES=="WP" | DATA$SPECIES=="GN",ifelse(DATA$FATE=="C","S","TEPS"),as.character(DATA$NATURE))           
+if(is.null(protected.species))
+{
+  DATA$FATE=ifelse(DATA$SPECIES=="WP",ifelse(DATA$YEAR<1997,"C","D"), 
+                   ifelse(DATA$SPECIES=="GN",ifelse(DATA$YEAR<2001,"C","D"),as.character(DATA$FATE)))
+  
+  DATA$NATURE=ifelse(DATA$SPECIES=="WP" | DATA$SPECIES=="GN",ifelse(DATA$FATE=="C","S","TEPS"),as.character(DATA$NATURE))           
+  
+}
                                                
   #remove unknown species codes
 a=subset(DATA,is.na(FATE),selec=c(SPECIES,COMMON_NAME));a=a[!duplicated(a$SPECIES),]
 NN.sp=a$SPECIES
-DATA=subset(DATA,!SPECIES%in%NN.sp)
+if(length(NN.sp)>0) DATA=subset(DATA,!SPECIES%in%NN.sp)
+DATA=DATA%>%filter(!SCIENTIFIC_NAME=='')
 
   #Add fishing zones (from Department of Fisheries WA)
 DATA$LATITUDE=with(DATA,ifelse(LATITUDE==0,-as.numeric(substr(BLOCK,1,2)),LATITUDE))
@@ -222,18 +293,28 @@ DATA=DATA%>%
          BIOREGION=ifelse(LATITUDE>(-34.5) & LATITUDE<(-30) &LONGITUDE< 118,"WC",BIOREGION))
 
   #Add regions (from Hall & Wise 2011)
-DATA$REGION=as.character(with(DATA,ifelse(LONGITUDE>=124 & LONGITUDE<=129,"Region1",
-       ifelse(LONGITUDE>=119 & LONGITUDE<124,"Region2",
-       ifelse(LONGITUDE>=116 & LONGITUDE<119,"Region3",
-       ifelse(LONGITUDE<116 & LATITUDE<=(-33),"Region4",
-       ifelse(LATITUDE>(-33) & LATITUDE<=(-30),"Region5",
-       ifelse(LATITUDE>(-30) & LATITUDE<=(-27),"Region6","Out.of.region"))))))))
+add.region=FALSE
+if(add.region)
+{
+  DATA$REGION=as.character(with(DATA,ifelse(LONGITUDE>=124 & LONGITUDE<=129,"Region1",
+                                            ifelse(LONGITUDE>=119 & LONGITUDE<124,"Region2",
+                                                   ifelse(LONGITUDE>=116 & LONGITUDE<119,"Region3",
+                                                          ifelse(LONGITUDE<116 & LATITUDE<=(-33),"Region4",
+                                                                 ifelse(LATITUDE>(-33) & LATITUDE<=(-30),"Region5",
+                                                                        ifelse(LATITUDE>(-30) & LATITUDE<=(-27),"Region6","Out.of.region"))))))))
+  
+}
 
   #Add area variable for temporal comparison
-DATA$AREA=as.character(with(DATA,ifelse(BLOCK%in%c(2813,2814,2914),"Area1",
-        ifelse(BLOCK%in%c(3114,3115,3214,3215),"Area2",
-        ifelse(BLOCK%in%c(3314,3315,3414,3415),"Area3",
-        ifelse(BLOCK%in%c(3322,3323,3324),"Area4",NA))))))
+if(add.region)
+{
+  DATA$AREA=as.character(with(DATA,ifelse(BLOCK%in%c(2813,2814,2914),"Area1",
+                                         ifelse(BLOCK%in%c(3114,3115,3214,3215),"Area2",
+                                                ifelse(BLOCK%in%c(3314,3315,3414,3415),"Area3",
+                                                       ifelse(BLOCK%in%c(3322,3323,3324),"Area4",NA))))))
+  
+}
+
 
   #Add period variable for spatial comparison
 DATA$SEASON=as.character(with(DATA,ifelse(MONTH==12 | MONTH<3,"Summer",
@@ -241,16 +322,24 @@ DATA$SEASON=as.character(with(DATA,ifelse(MONTH==12 | MONTH<3,"Summer",
          ifelse(MONTH>=6 & MONTH<9,"Winter",
          ifelse(MONTH>=9 & MONTH<12,"Spring",NA))))))
 
-#YR.selected=c(1995:1998,2002:2003)
-YR.selected=table(DATA$YEAR)
-YR.selected=as.numeric(names(YR.selected[YR.selected>1e3]))
-DATA$Yr.dummy=with(DATA,ifelse(YEAR%in%YR.selected,YEAR,NA))
-DATA$PER=as.character(with(DATA,paste(Yr.dummy,SEASON)))
-DATA$PERIOD=with(DATA,ifelse(substr(PER,1,2)=="NA",NA,PER))
-DATA=DATA[,-match(c("Yr.dummy","PER"),colnames(DATA))]
+#YR.selected=c(1995:1998,2002:2003) 
+do.this=FALSE
+if(do.this)  
+{
+  YR.selected=table(DATA$YEAR)
+  YR.selected=as.numeric(names(YR.selected[YR.selected>1e3]))
+  DATA$Yr.dummy=with(DATA,ifelse(YEAR%in%YR.selected,YEAR,NA))
+  DATA$PER=as.character(with(DATA,paste(Yr.dummy,SEASON)))
+  DATA$PERIOD=with(DATA,ifelse(substr(PER,1,2)=="NA",NA,PER))
+  DATA=DATA[,-match(c("Yr.dummy","PER"),colnames(DATA))]
+  
+}
 
-  #Add gillnet effort
-DATA$EFFORT=DATA$NET_LENGTH*DATA$SOAK_TIME
+  #Add effort
+DATA=DATA%>%
+      mutate(EFFORT=ifelse(Method=='GN',NET_LENGTH*SOAK_TIME,
+                    ifelse(Method=='LL',N.hooks*SOAK_TIME,
+                    NA)))
 
 
   #Remove tropical species that belong to the Northern Territory and the "other sharks and scale fish" group
@@ -258,6 +347,7 @@ DATA=subset(DATA, FATE!="A" & SPECIES!="XX")
 
   #Add number caught
 DATA$INDIVIDUALS=1
+if(response.var=='cpue') DATA$INDIVIDUALS=DATA$INDIVIDUALS/DATA$EFFORT
 
   #Fill in TL if FL available  
 Len.cof=Len.cof%>%mutate(Species=capitalize(tolower(Species)),
@@ -270,7 +360,7 @@ DATA=DATA%>%
                        Disc.width,TL))%>%
       dplyr::select(-c(Intercept,Slope))
 
-  #Fill in teleost FL with a constant
+  #Fill in teleost FL with a proportion of TL
 DATA$FL=with(DATA,{ifelse(NATURE=="T" & is.na(FL),TL*.85,FL)}) 
 
   #fix missing FL
@@ -295,7 +385,11 @@ DATA=DATA%>%
          SKIPPER=case_when(grepl('lotti',SKIPPER)~"c. gullotti",
                            SKIPPER%in%c('carlo','carlo gulloti','c.gulloti')~"c. gullotti",
                            grepl('c00ke',SKIPPER)~"j.cooke",
+                           grepl('d. rogers',SKIPPER)~"d.rogers", 
+                           grepl('c. barnard',SKIPPER)~"c.barnard",
                            grepl('parker',SKIPPER)~"r.parker",
+                           grepl('hayle',SKIPPER)~"p.hayler",
+                           grepl('hoffha',SKIPPER)~"r. hoffhamer",
                            grepl(paste(c('thorton','thornton','j.t'),collapse='|'),SKIPPER)~"j. thornton",
                            TRUE~SKIPPER),
          BOAT=case_when(is.na(BOAT) & SKIPPER=='c. gullotti'~'F505',
@@ -308,8 +402,9 @@ DATA=DATA%>%
 DATA=subset(DATA,select=c(SHEET_NO,YEAR,MONTH,BLOCK,BOAT,SKIPPER,SPECIES,FATE,
                           COMMON_NAME,NATURE,TL,SEX,TROPHIC_LEVEL,TL_SD,BOTDEPTH,
                           MESH_SIZE,NET_LENGTH,SOAK_TIME,EFFORT,LATITUDE,LONGITUDE,
-                          ZONE,REGION,BIOREGION,AREA,SEASON,PERIOD,INDIVIDUALS,
-                          PCS,SCIENTIFIC_NAME))
+                          ZONE,BIOREGION,SEASON,INDIVIDUALS,
+                          PCS,SCIENTIFIC_NAME,Fishery,Loo,K,tmax,tm,Lm,Body.shape,Habitat,Movement.scale,
+                          Maximum.size,Body.depth,Head.length,Eye.diameter,Pre.orbital.length,Feeding.group,Trophic.level.fishbase))
 
 #remove records from shots with less than Min.shts per year-block
 d=DATA[!duplicated(DATA$SHEET_NO),]
@@ -332,26 +427,34 @@ DATA=subset(DATA,YEAR%in%names(AA))
 
 #Show when species start appearing in data set
 YEAR.min=min(DATA$YEAR)
-a=DATA%>%
-  mutate(Julian=julian(as.Date(paste(YEAR,MONTH,1,sep='-')),origin=as.Date(paste(YEAR.min,1,1,sep='-'))))%>%
-  distinct(MONTH,YEAR,Julian,SCIENTIFIC_NAME)%>%
-  mutate(N=1)
-dummi=data.frame(SCIENTIFIC_NAME=names(sort(table(a$SCIENTIFIC_NAME))))%>%mutate(row_id=row_number())
-LabL=dummi$SCIENTIFIC_NAME
-names(LabL)=dummi$row_id
-a=a%>%
-  left_join(dummi,by="SCIENTIFIC_NAME")
-a%>%
-  ggplot(aes(Julian,row_id))+
-  geom_point()+
-  scale_y_continuous(labels=LabL,n.breaks=length(LabL),breaks=as.numeric(names(LabL)))+
-  ylab('')+xlab('Julian day')+
-  theme(axis.text.y = element_text(size = 7))
-ggsave("Outputs/Exploratory/Species appearing in observer data.tiff",width = 6,height = 10,compression = "lzw")
+fn.shw.appear=function(a)
+{
+  a=a%>%
+    mutate(Julian=julian(as.Date(paste(YEAR,MONTH,1,sep='-')),origin=as.Date(paste(YEAR.min,1,1,sep='-'))))%>%
+    distinct(MONTH,YEAR,Julian,SCIENTIFIC_NAME)%>%
+    mutate(N=1)
+  dummi=data.frame(SCIENTIFIC_NAME=names(sort(table(a$SCIENTIFIC_NAME))))%>%mutate(row_id=row_number())
+  LabL=dummi$SCIENTIFIC_NAME
+  names(LabL)=dummi$row_id
+  a=a%>%
+    left_join(dummi,by="SCIENTIFIC_NAME")
+ p=a%>%
+    ggplot(aes(Julian,row_id))+
+    geom_point()+
+    scale_y_continuous(labels=LabL,n.breaks=length(LabL),breaks=as.numeric(names(LabL)))+
+    ylab('')+xlab('Julian day')+
+    theme(axis.text.y = element_text(size = 7))
+  print(p)
+}
+fn.shw.appear(a=DATA%>%filter(Fishery=='TDGDLF'))
+ggsave("Outputs/Exploratory/Species appearing in observer data_TDGDLF.tiff",width = 6,height = 10,compression = "lzw")
+
+fn.shw.appear(a=DATA%>%filter(Fishery=='NSF'))
+ggsave("Outputs/Exploratory/Species appearing in observer data_NSF.tiff",width = 6,height = 10,compression = "lzw")
 
 
 
-  #3.3. Manipulated landings data (Monthly-aggregated records to 2021)
+  #3.4. Manipulated landings data (Monthly-aggregated records to 2021)
 if(do.commercial)
 {
   Data.monthly=Data.monthly%>%
@@ -401,7 +504,7 @@ if(do.commercial)
                  ifelse(SPECIES==18014,'Blacktip Shark',
                         SNAME))))
   
-  #add species trophic level,etc
+  #add species trophic level,etc 
   Data.Mon=merge(Data.monthly,SPECIES_PCS_FATE_Com,by="SPECIES",all.x=T,all.y=F)%>%  
                     rename(ZONE=zone)%>%
     mutate(BIOREGION=case_when(LONGITUDE>=115.5 & LONGITUDE<=129 & LATITUDE<=(-26)~"SC",
@@ -410,13 +513,17 @@ if(do.commercial)
                                LONGITUDE>=114.834 & LONGITUDE<=129 & LATITUDE>=(-27)~"NC",
                                TRUE ~ NA_character_),
            BIOREGION=ifelse(LATITUDE>(-34.5) & LATITUDE<(-30) &LONGITUDE< 118,"WC",BIOREGION))
-  Data.monthly=subset(Data.Mon,select=c(SHEET_NO,YEAR,MONTH,BLOCK,BOAT,TYPE.DATA,SPECIES,
+  Data.monthly=subset(Data.Mon,!is.na(Loo),select=c(SHEET_NO,YEAR,MONTH,BLOCK,BOAT,TYPE.DATA,SPECIES,
                                         SCIENTIFIC_NAME,NATURE,LIVEWT.c,TROPHIC_LEVEL,TL_SD2,EFFORT,
                                         LATITUDE,LONGITUDE,ZONE,BIOREGION,
-                                        Loo,K,tmax,tm,Lm))
+                                        Loo,K,tmax,tm,Lm,Movement.scale,
+                                        Maximum.size,Body.depth,Head.length,Eye.diameter,Pre.orbital.length,Feeding.group,
+                                        Trophic.level.fishbase,Body.shape,Habitat))
+  
   Data.monthly=subset(Data.monthly,!is.na(Data.monthly$TROPHIC_LEVEL))
   Data.monthly$SPECIES=as.factor(Data.monthly$SPECIES)
   Data.monthly$INDIVIDUALS=Data.monthly$LIVEWT.c
+  if(response.var=='cpue') Data.monthly$INDIVIDUALS=Data.monthly$INDIVIDUALS/Data.monthly$EFFORT
   Data.monthly$FINYEAR=Data.monthly$YEAR
   Data.monthly$YEAR=as.numeric(substr(Data.monthly$YEAR,1,4))
   
@@ -496,19 +603,150 @@ if(do.commercial)
     scale_y_continuous(labels=LabL,n.breaks=length(LabL),breaks=as.numeric(names(LabL)))+
     ylab('')+xlab('Julian day')+
     theme(axis.text.y = element_text(size = 7))
-  ggsave("Outputs/Exploratory/Species appearing in logbook.tiff",width = 6,height = 10,compression = "lzw")
+  ggsave("Outputs/Exploratory/Species appearing in logbook_TDGDLF.tiff",width = 6,height = 10,compression = "lzw")
 
   rm(Data.Mon,a)
+  
+  if(use.NSF)   
+  {
+    Data.monthly.north=Data.monthly.north%>%
+      filter(METHOD=="LL" & zone%in%c('Joint','North') & LATITUDE>(-26))%>%
+      dplyr::select(-NETLEN.c)
+    Data.daily.north=Data.daily.north%>%filter(METHOD=="LL" & zone%in%c('Joint','North') & LATITUDE>(-26))
+    if(combine.daily.monthly)
+    {
+      Data.daily.agg=Data.daily.north%>%
+        group_by(YEAR,MONTH,BOAT,METHOD,BLOCK,SPECIES,SNAME,YEAR.c,
+                 LATITUDE,LONGITUDE,TYPE.DATA,zone,SKIPPER)%>%
+        summarise(LIVEWT.c=sum(LIVEWT.c))
+      Effort.daily.agg=Data.daily.north%>%
+        distinct(SHEET_NO,EFFORT,YEAR,MONTH,BOAT,METHOD,BLOCK)%>%
+        group_by(YEAR,MONTH,BOAT,METHOD,BLOCK)%>%
+        summarise(EFFORT=sum(EFFORT))
+      Data.monthly.north=rbind(Data.monthly.north,
+                         Data.daily.agg%>%
+                           left_join(Effort.daily.agg,by=c('YEAR','MONTH','BOAT','METHOD','BLOCK'))%>%
+                           mutate(SHEET_NO=paste(YEAR,MONTH,BOAT,METHOD,BLOCK))%>%
+                           relocate(names(Data.monthly.north)))
+    }
+    
+    #remove records from shots with less than Min.shts per year-block
+    d=Data.monthly.north[!duplicated(Data.monthly.north$SHEET_NO),]
+    d$N=1
+    d1=aggregate(N~BLOCK+YEAR,d,sum)
+    N.base.case=subset(d1,N>Min.shts)
+    N.base.case$Yr.blk=with(N.base.case,paste(YEAR,BLOCK,sep="_"))
+    Data.monthly.north$Yr.blk=with(Data.monthly.north,paste(YEAR,BLOCK,sep="_"))
+    Data.monthly.north=subset(Data.monthly.north,Yr.blk%in%N.base.case$Yr.blk)
+    
+    #Remove boats with less than Min.recs
+    AA=sort(table(Data.monthly.north$BOAT))
+    AA=AA[AA>Min.recs]
+    Data.monthly.north=subset(Data.monthly.north,BOAT%in%names(AA))
+    
+    #Remove years with less than Min.recs
+    AA=sort(table(Data.monthly.north$YEAR))
+    AA=AA[AA>Min.recs]
+    Data.monthly.north=subset(Data.monthly.north,YEAR%in%names(AA))
+    
+    #Fix duplicated SPECIES
+    Data.monthly.north=Data.monthly.north%>%
+      mutate(SNAME=ifelse(SPECIES==22999,'shark, other',
+                          ifelse(SPECIES==18003,'Dusky Whaler',
+                                 ifelse(SPECIES==18014,'Blacktip Shark',
+                                        SNAME))))
+    
+    #add species trophic level,etc 
+    Data.Mon=merge(Data.monthly.north,SPECIES_PCS_FATE_Com,by="SPECIES",all.x=T,all.y=F)%>%  
+      rename(ZONE=zone)%>%
+      mutate(BIOREGION=case_when(LONGITUDE>=115.5 & LONGITUDE<=129 & LATITUDE<=(-26)~"SC",
+                                 LONGITUDE<115.5 & LATITUDE<=(-27)~"WC",
+                                 LONGITUDE<=114.834 & LATITUDE>(-27)~"Gascoyne",
+                                 LONGITUDE>=114.834 & LONGITUDE<=129 & LATITUDE>=(-27)~"NC",
+                                 TRUE ~ NA_character_),
+             BIOREGION=ifelse(LATITUDE>(-34.5) & LATITUDE<(-30) &LONGITUDE< 118,"WC",BIOREGION))
+    Data.monthly.north=subset(Data.Mon,!is.na(Loo),select=c(SHEET_NO,YEAR,MONTH,BLOCK,BOAT,TYPE.DATA,SPECIES,
+                                                      SCIENTIFIC_NAME,NATURE,LIVEWT.c,TROPHIC_LEVEL,TL_SD2,EFFORT,
+                                                      LATITUDE,LONGITUDE,ZONE,BIOREGION,
+                                                      Loo,K,tmax,tm,Lm,Movement.scale,
+                                                      Maximum.size,Body.depth,Head.length,Eye.diameter,Pre.orbital.length,Feeding.group,
+                                                      Trophic.level.fishbase,Body.shape,Habitat))
+    
+    Data.monthly.north=subset(Data.monthly.north,!is.na(Data.monthly.north$TROPHIC_LEVEL))
+    Data.monthly.north$SPECIES=as.factor(Data.monthly.north$SPECIES)
+    Data.monthly.north$INDIVIDUALS=Data.monthly.north$LIVEWT.c
+    if(response.var=='cpue') Data.monthly.north$INDIVIDUALS=Data.monthly.north$INDIVIDUALS/Data.monthly.north$EFFORT
+    Data.monthly.north$FINYEAR=Data.monthly.north$YEAR
+    Data.monthly.north$YEAR=as.numeric(substr(Data.monthly.north$YEAR,1,4))
+    
+
+    #Show when species start appearing in data set  
+    YEAR.min=min(Data.monthly.north$YEAR)
+    a=Data.monthly.north%>%
+      mutate(Julian=julian(as.Date(paste(YEAR,MONTH,1,sep='-')),origin=as.Date(paste(YEAR.min,1,1,sep='-'))))%>%
+      distinct(MONTH,YEAR,Julian,SCIENTIFIC_NAME)%>%
+      mutate(N=1)
+    dummi=data.frame(SCIENTIFIC_NAME=names(sort(table(a$SCIENTIFIC_NAME))))%>%mutate(row_id=row_number())
+    LabL=dummi$SCIENTIFIC_NAME
+    names(LabL)=dummi$row_id
+    a=a%>%
+      left_join(dummi,by="SCIENTIFIC_NAME")
+    
+    a%>%
+      ggplot(aes(Julian,row_id))+
+      geom_point()+
+      scale_y_continuous(labels=LabL,n.breaks=length(LabL),breaks=as.numeric(names(LabL)))+
+      ylab('')+xlab('Julian day')+
+      theme(axis.text.y = element_text(size = 7))
+    ggsave("Outputs/Exploratory/Species appearing in logbook_NSF.tiff",width = 6,height = 10,compression = "lzw")
+    
+    rm(Data.Mon,a)
+  }
 }
 
 
-# 4 Ecosystems indicators analysis-----------------------------------------------------------------------
-Data.list=list(Observer=DATA)
+# 4 Ecosystems indicators analyses-----------------------------------------------------------------------
+
+setwd(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs"))
+
+# Define which ecosystem indicator to consider
+Resp.vars_observer=c(subset(Ecol.Indicators,!Ecol.Indicators%in%c("FIB")),traits,Functional.diversity) 
+Resp.vars_logbook=c(Ecol.Indicators%>%subset(Ecol.Indicators%in%c("Shannon","Pielou","Simpson","MTL")),
+              traits,Functional.diversity)
+
+
+  #4.1. Put data set in right format and calculate indicators
+Data.list=list(Observer=DATA%>%filter(Fishery=='TDGDLF')%>%select(-Fishery))
 if(do.commercial) Data.list$Logbook=Data.monthly
-Store.data.list=vector('list',length(Data.list))
-names(Store.data.list)=names(Data.list)
+if(use.NSF)
+{
+  Data.list$Observer.north=DATA%>%filter(Fishery=='NSF')%>%select(-Fishery)
+  if(do.commercial) Data.list$Logbook.north=Data.monthly.north
+}
+
+#drop data sets if not meeting minimum number of record criteria
+Keep.dis=rep('no',length(Data.list))
 for(l in 1:length(Data.list))
 {
+  Table.shots.year=with(Data.list[[l]]%>%distinct(SHEET_NO,YEAR),table(YEAR))
+  print(Table.shots.year)
+  iers=Table.shots.year[Table.shots.year>=Min.shots.year]
+  Data.list[[l]]=Data.list[[l]]%>%filter(YEAR%in%as.numeric(names(iers)))
+  if(length(iers)>=Min.years) Keep.dis[l]='yes'
+}
+Data.list=Data.list[which(Keep.dis=='yes')]
+
+#start from 1988 when all species had been assigned a species code
+for(l in 1:length(Data.list))  Data.list[[l]]=Data.list[[l]]%>%filter(YEAR>=1988)
+
+
+#calculate indicators
+Store.data.list=vector('list',length(Data.list))
+names(Store.data.list)=names(Data.list)
+for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
+{
+  print(paste("Ecosystems indicators calculation for -----------",names(Data.list)[l]))
+  
   #1. Preliminary analyses
   if(do.exploratory=='YES')
   {
@@ -542,15 +780,15 @@ for(l in 1:length(Data.list))
     
     fn.fig(paste0("Outputs/Exploratory/Map of number of sheets per block_",names(Data.list)[l]),2000,2000) 
     par(las=1,mar=c(1.75,3.5,1.5,.1),oma=c(1.5,1,.1,.1),mgp=c(1,.8,0),cex.lab=1.25)
-    
-    maps::map("worldHires",xlim=c(112.95, 129.5),ylim=c(-36, -26.5),col="grey80",fill=F)
+    MIN=max(-36,min(surveys$LAT_BLOCK))
+    maps::map("worldHires",xlim=c(112.95, 129.5),ylim=c(MIN, max(surveys$LAT_BLOCK)),col="grey80",fill=F)
     for(i in seq(surveys$SURVEYS))
     {
       rect(surveys$LONG_BLOCK[i],surveys$LAT_BLOCK[i]-1,surveys$LONG_BLOCK[i]+1,surveys$LAT_BLOCK[i],border="blue",col=ocean.pal[surveys$SURVEYS[i]])
     }
-    maps::map("worldHires",xlim=c(112.95, 129.5),ylim=c(-36, -26.5),col="grey80",fill=T,border="grey80",add=T)
+    maps::map("worldHires",xlim=c(112.95, 129.5),ylim=c(MIN, max(surveys$LAT_BLOCK)),col="grey80",fill=T,border="grey80",add=T)
     rect(surveys$LONG_BLOCK,surveys$LAT_BLOCK-1,surveys$LONG_BLOCK+1,surveys$LAT_BLOCK,border="blue")
-    mtext("No of sheet # per block",line=1,cex=1.5)
+    mtext("Total sheet numbers per block",line=1,cex=1.5)
     text(surveys$LONG_BLOCK+0.5,surveys$LAT_BLOCK-0.5,surveys$SURVEYS,cex=0.8)
     text(127.5,-27,paste("n =",sum(surveys[2])))
     dev.off()
@@ -564,11 +802,11 @@ for(l in 1:length(Data.list))
       ggplot(aes(LON,LAT,size=n,color=n))+
       geom_point()+
       facet_wrap(~YEAR)+
-      xlim(112.5,129)+ylim(-35.5,-27)
+      xlim(112.5,129)+ylim(MIN,max(surveys$LAT_BLOCK))
     ggsave(paste0("Outputs/Exploratory/Map of number of sheets per block per year_",names(Data.list)[l],'.tiff'),
            width = 8,height = 8,compression = "lzw")
     
-    #No of shots per year-block-month
+    #Number of shots per year-block-month
     a=Data.list[[l]][!duplicated(Data.list[[l]]$SHEET_NO),]
     a$N=1
     a=aggregate(N~YEAR+MONTH+BLOCK+LATITUDE+LONGITUDE,a,sum)
@@ -580,8 +818,8 @@ for(l in 1:length(Data.list))
     rm(a)
     
     #Export species by year
-    if(names(Data.list)[l]=="Observer")dis.var='COMMON_NAME'
-    if(names(Data.list)[l]=="Logbook")dis.var='SCIENTIFIC_NAME'
+    if(grepl("Observer",names(Data.list)[l]))dis.var='COMMON_NAME'
+    if( grepl("Logbook",names(Data.list)[l]))dis.var='SCIENTIFIC_NAME'
     TBLA=table(paste(Data.list[[l]][,dis.var],Data.list[[l]]$TROPHIC_LEVEL),Data.list[[l]]$YEAR)
     write.csv(TBLA,paste0('Outputs/Exploratory/TBLA_species.TL_year_',names(Data.list)[l],'.csv'),row.names=T)
     TBLA=table(Data.list[[l]][,dis.var],Data.list[[l]]$YEAR)
@@ -601,7 +839,6 @@ for(l in 1:length(Data.list))
     dev.off()
   }
   
-  
   #2. Define factors and character variables
   Data.list[[l]]=Data.list[[l]]%>%
                   mutate(YEAR=as.character(YEAR),
@@ -611,28 +848,20 @@ for(l in 1:length(Data.list))
                          Yr.blk=paste(YEAR,BLOCK,sep="_"))
 
   #3. Calculate ecological and functional indicators
-  if(names(Data.list)[l]=="Observer")
-  {
-    idvarS=IDVAR
-    resp.vars=subset(Ecol.Indicators,!Ecol.Indicators%in%c("MTL","FIB"))
-  }
-  if(names(Data.list)[l]=="Logbook")
-  {
-    idvarS=c("SHEET_NO","YEAR","BLOCK","BOAT","MONTH","LATITUDE","LONGITUDE")
-    resp.vars=c(Ecol.Indicators%>%subset(Ecol.Indicators%in%c("Shannon","Pielou","Simpson","MTL")),
-                traits)
-  }
+  idvarS=IDVAR[which(IDVAR%in%names(Data.list[[l]]))]
+  if(grepl("Observer",names(Data.list)[l])) resp.vars=Resp.vars_observer
+  if(grepl("Logbook",names(Data.list)[l]))  resp.vars=Resp.vars_logbook
+  
   n.rv=length(resp.vars)
   Main.title=resp.vars
   Res.var.in.log=rep("NO",length(resp.vars))  #fit response var in log space or not? 
     
-  OUT.base.case=fn.calc.ecol.ind(DaTA=Data.list[[l]],
-                                 dat.nm="BC",
+  OUT.base.case=fn.calc.ecol.ind(DaTA=Data.list[[l]],  
                                  normalised="YES",
                                  Drop.yrs="NO",
-                                 idvarS=idvarS,
+                                 idvarS=idvarS,  
                                  resp.vars=resp.vars)
-  if(names(Data.list)[l]=="Observer")
+  if(check.discards & grepl("Observer",names(Data.list)[l]))
   {
     OUT.base.case.retained=fn.calc.ecol.ind(DaTA=Data.list[[l]]%>%filter(FATE=='C'),
                                             dat.nm="BC",
@@ -648,17 +877,18 @@ for(l in 1:length(Data.list))
                                             resp.vars=subset(resp.vars,!resp.vars=="Prop.Disc"))
   }
   
-  #Exploratory analyses
+  #Exploratory analyses 
   if(do.exploratory=="YES")
   {
     #Look at annual averages  
-    fn.viol.box(d=OUT.base.case,byzone=TRUE,resp.vars)
-    ggsave(paste0("Outputs/Exploratory/bxplt_year.zone_",names(Data.list)[l],'.tiff'),
-           width = 8,height = 6,compression = "lzw")
+   # fn.viol.box(d=OUT.base.case,byzone=TRUE,resp.vars=resp.vars)
+   # ggsave(paste0("Outputs/Exploratory/bxplt_year.zone_",names(Data.list)[l],'.tiff'),
+   #        width = 8,height = 6,compression = "lzw")
     fn.viol.box(d=OUT.base.case,byzone=FALSE,filcol='lightsalmon2',resp.vars)
     ggsave(paste0("Outputs/Exploratory/bxplt_year_",names(Data.list)[l],'.tiff'),
-           width = 8,height = 6,compression = "lzw")
-    if(names(Data.list)[l]=="Observer")
+           width = 10,height = 6,compression = "lzw")
+    
+    if(check.discards & grepl("Observer",names(Data.list)[l]))
     {
       fn.viol.box(d=OUT.base.case.retained,byzone=FALSE,filcol='lightsalmon2',resp.vars=subset(resp.vars,!resp.vars=="Prop.Disc"))
       ggsave(paste0("Outputs/Exploratory/bxplt_year_",names(Data.list)[l],'_retained.tiff'),
@@ -693,28 +923,86 @@ for(l in 1:length(Data.list))
 
   }
   
-  #ACA apply models developed in 'fn.loop.over.obsrvr.data()', etc
-  
-  
   #Store results
   Store.data.list[[l]]=OUT.base.case
   rm(OUT.base.case)
 }
 
 
+  #4.2. Stats     
+setwd(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate"))
+Store.out=vector('list',length(Data.list))
+names(Store.out)=names(Data.list)
+tic()
+for(l in 1:length(Store.out)) 
+{
+  print(paste("Ecosystems indicators stats for -----------",names(Data.list)[l]))
+  
+  IdvarS=IDVAR[which(IDVAR%in%names(Store.data.list[[l]]))]
+  if(grepl("Observer",names(Store.data.list)[l])) Resp.vars=Resp.vars_observer
+  if(grepl("Logbook",names(Store.data.list)[l]))  Resp.vars=Resp.vars_logbook
+  inters="YES"
+  if(names(Store.data.list)[l]=="Logbook.north") inters="NO"   #not enough degrees of freedom
+  Store.out[[l]]=fn.apply.model(DaTA=Store.data.list[[l]],
+                                dat.nm=names(Store.data.list)[l],
+                                normalised="YES",
+                                Drop.yrs="NO",
+                                idvarS=IdvarS,
+                                resp.vars=Resp.vars,
+                                ADD.INTER=inters)
+  
+  Store.out[[l]]=Store.out[[l]]%>%
+                    mutate(Data.set=names(Store.data.list)[l],
+                           Indicator=case_when(Indicator=="FnRich_morph"~"Functional richness (morph.)",
+                                               Indicator=="FnRich_ecol"~"Functional richness (ecol.)",
+                                               Indicator=="MTL"~"Mean trophic level",
+                                               Indicator=="MML"~"Mean maximum length",
+                                               Indicator=="MeanML"~"Mean length",
+                                               Indicator=="Prop.Disc"~"Proportion of discards",
+                                               Indicator=="MaxAge"~"Maximum age",
+                                               Indicator=="Age.mat.prop"~"Proportion mature",
+                                               Indicator=="K"~"Growth coefficient",
+                                               Indicator=="MaxLen"~"Maximum length",
+                                               TRUE~Indicator))
+}
+toc()
 
-  #--- 4.1 WA Fisheries observer data---
+#4.3. Display stats results  
+#by data set
+for(l in 1:length(Store.out)) 
+{
+  Store.out[[l]]%>%
+    ggplot(aes(yr,MeAn))+
+    geom_point()+
+    geom_errorbar(aes(ymin = LowCI, ymax = UppCI))+
+    facet_wrap(~Indicator,scales='free_y')+
+    scale_y_continuous(limits = c(0, NA))+
+    theme_PA(strx.siz=9)+ylab('Relative value')+xlab('Year')
+  ggsave(paste0("Year prediction_",names(Store.out)[l],".tiff"),width = 6.5,height = 6,compression = "lzw")
+}
 
-# 4.1.1 Preliminary analyses
 
+#data sets combined  
+do.call(rbind,Store.out)%>%
+  mutate(yr=case_when(Data.set=='Logbook'~yr+0.25,
+                      Data.set=='Logbook.north'~yr-0.25,
+                      TRUE~yr),
+         Data.set=case_when(Data.set=='Logbook'~"TDGDLF",
+                            Data.set=='Logbook.north'~'NSF',
+                            TRUE~Data.set))%>%
+  ggplot(aes(yr,MeAn,color=Data.set))+
+  geom_point(alpha=0.8,size=0.9)+
+  geom_errorbar(aes(ymin = LowCI, ymax = UppCI))+
+  #geom_line()+
+  facet_wrap(~Indicator,scales='free_y',ncol=2)+
+  scale_y_continuous(limits = c(0, NA))+
+  theme_PA(strx.siz=9)+ylab('Relative value')+xlab('Year')+
+  theme(legend.position = 'top',
+        legend.title=element_blank())
+ggsave(paste0("Year prediction_Combined.tiff"),width = 5,height = 8,compression = "lzw")
 
-
-
-
-#boats and skippers 
-# A=table(as.character(DATA$BOAT),as.character(DATA$SKIPPER),useNA = "ifany")
-# A[A>0]=1
-
+#ACA
+# 5 Multivariate analyses-------------------------------------------------------------------------
 
 
 

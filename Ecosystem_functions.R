@@ -16,6 +16,9 @@ require(vegan)
 require(BEQI2)
 require(asbio)
 require(marindicators)   #see fishingInBalance() margalef() meanTLLandings() etc etc, lots of functions
+library(FD)   #functional diversity
+library(mgcv)
+library(flextable)
 
 #--FUNCTIONS---
 
@@ -168,50 +171,25 @@ Dsquared <- function(model, adjust = FALSE)
 }  
 
 #function for exporting table
-Export.tbl=function(WD,Tbl,Doc.nm,caption,paragph,HdR.col,HdR.bg,Hdr.fnt.sze,Hdr.bld,
-                    body.fnt.sze,Zebra,Zebra.col,Grid.col,Fnt.hdr,Fnt.body,
-                    HDR.names,HDR.span,HDR.2nd)
+Export.tbl=function(WD,Tbl,Doc.nm)
 {
-  mydoc = docx(Doc.nm)  #create r object
-  mydoc = addSection( mydoc, landscape = T )   #landscape table
-  # add title
-  if(!is.na(caption))mydoc = addParagraph(mydoc, caption, stylename = "TitleDoc" )
-  
-  # add a paragraph
-  if(!is.na(paragph))mydoc = addParagraph(mydoc , paragph, stylename="Citationintense")
-  
-  #add table
-  MyFTable=FlexTable(Tbl,header.column=F,add.rownames =F,
-                     header.cell.props = cellProperties(background.color=HdR.bg), 
-                     header.text.props = textProperties(color=HdR.col,font.size=Hdr.fnt.sze,
-                                                        font.weight="bold",font.family =Fnt.hdr), 
-                     body.text.props = textProperties(font.size=body.fnt.sze,font.family =Fnt.body))
-  
-  #Add header
-  MyFTable = addHeaderRow(MyFTable,text.properties=textBold(),value=HDR.names,colspan=HDR.span)
-  
-  #Add second header
-  MyFTable = addHeaderRow(MyFTable, text.properties = textBold(),value =HDR.2nd)
-  
-  
-  # zebra stripes - alternate colored backgrounds on table rows
-  if(Zebra=="YES") MyFTable = setZebraStyle(MyFTable, odd = Zebra.col, even = "white" )
-  
-  # table borders
-  MyFTable = setFlexTableBorders(MyFTable,
-                                 inner.vertical = borderNone(),inner.horizontal = borderNone(),
-                                 outer.vertical = borderNone(),
-                                 outer.horizontal = borderProperties(color=Grid.col, style="solid", width=4))
-  
-  # set columns widths (in inches)
-  #MyFTable = setFlexTableWidths( MyFTable, widths = Col.width)
-  
-  mydoc = addFlexTable( mydoc, MyFTable)   
-  mydoc = addSection( mydoc, landscape = F ) 
-  
-  # write the doc 
-  writeDoc( mydoc, file = paste(Doc.nm,".docx",sep=''))
-}
+  aid=match(unique(Tbl$Indicator), Tbl$Indicator)
+  t.first <- Tbl$Indicator[aid]
+  Tbl$Indicator=''
+  Tbl$Indicator[aid]=t.first
+  Tbl%>%
+    mutate(p.value=formatC(as.numeric(p.value), format = "e", digits = 2))%>%
+    flextable()%>%
+    fontsize(size=8, part='body')%>%
+    fontsize(size=9, part='header')%>%
+    width(width=2,unit='cm')%>%
+    width(j='Term',width=4,unit='cm')%>%
+    align(align="left", part = "all")%>%
+    valign(valign = "top", part = "all")%>%
+    bg(bg = 'grey85', part = "header")%>%
+    bold(part = "header")%>%
+    save_as_docx( path = paste(WD,paste0(Doc.nm,".docx"),sep='/'))
+  }
 
 
 #handy function for exporting figures
@@ -249,6 +227,68 @@ Mst.cmn=function(D)
 {
   D=table(D)
   return(names(sort(D)[length(D)]))
+}
+
+#gamm approach
+Mod.fn.gamm=function(d,ResVar,Expl.vars,Predictrs,FactoRs,OFFSET,log.var,add.inter,MixedEff,temporal.autocorr)
+{
+  d=d[,match(c(ResVar,Expl.vars),names(d))]
+  d=d[!is.na(d[,match(ResVar,names(d))]),]
+  d=d[d[,match(ResVar,names(d))]>0,]
+  if(!is.na(OFFSET))d=subset(d,!is.na(EFFORT))
+  if(log.var=="YES" & length(d$BOTDEPTH)>0)
+  {
+    d=subset(d,!is.na(BOTDEPTH))
+    d=subset(d,BOTDEPTH>=3)
+    d$log.BOTDEPTH=log(d$BOTDEPTH)
+  }
+  Y=d[,match(ResVar,names(d))]
+  if(!is.na(OFFSET))d$log.EFFORT=log(d$EFFORT)
+  
+  #set factors
+  for(x in 1:length(FactoRs)) d[,match(FactoRs[x],names(d))]=as.factor(d[,match(FactoRs[x],names(d))])
+  
+  #build formula
+  IDS=match(c("LATITUDE","LONGITUDE"),Predictrs)
+  other.preds=Predictrs[-IDS]
+  Pre.inter=Predictrs[IDS]
+  if("MONTH" %in%other.preds)
+  {
+    d$MONTH=as.numeric(d$MONTH)
+    other.preds[match('MONTH',other.preds)]="s(MONTH,k=12,bs='cc')"
+  }
+  if("BOTDEPTH"%in%other.preds) other.preds[match('BOTDEPTH',other.preds)]="s(BOTDEPTH)"
+  if(!is.na(MixedEff))
+  {
+    Pred.1=paste(paste(c(other.preds[-match(MixedEff,other.preds)]),collapse="+"),
+                 paste0("+s(",MixedEff,",bs='re')"),sep="")
+    
+  }
+  if(is.na(MixedEff))
+  {
+    Pred.1=paste(other.preds,collapse="+")
+  }
+  if(add.inter=="YES")  Pred.form=paste0('s(',paste(Pre.inter,collapse=","),')') 
+  if(!add.inter=="YES") Pred.form=paste(Pre.inter,collapse="+")
+  if(!is.na(OFFSET)) Pred.form=paste(c(Pred.1,Pred.form,OFFSET),collapse="+")
+  if(is.na(OFFSET))  Pred.form=paste(c(Pred.1,Pred.form),collapse="+")
+  
+  if(log.var=="YES")Formula=as.formula(paste("log(",ResVar,")", "~", Pred.form,collapse=NULL))
+  if(log.var=="NO")Formula=as.formula(paste(ResVar, "~", Pred.form,collapse=NULL))
+  
+  
+  #Fit model
+  
+  null.model=gamm(as.formula(paste(ResVar, "~", paste0("1+s(",MixedEff,",bs='re')"),collapse=NULL)), data=d)  
+  
+  if(temporal.autocorr) 
+  {
+    model=gamm(Formula, correlation = corAR1(), data=d)
+  }else
+  {
+    model=gamm(Formula, data=d)
+  }
+  return(list(model=model, null.model=null.model,data=d))
 }
 
 #glm approach
@@ -601,7 +641,7 @@ fn.relative=function(D)
 }
 
 #Plot predictions
-fun.plt.pred=function(d,Show.pred,normalised,PredictorS,MAIN,log.var,Cx,YLIM,Cx.axs)
+fun.pred=function(d,Show.pred,normalised,PredictorS,log.var,MDL)
 {
   #create new data
   Dat=d$data
@@ -632,13 +672,26 @@ fun.plt.pred=function(d,Show.pred,normalised,PredictorS,MAIN,log.var,Cx,YLIM,Cx.
     d.frm[,q]=Value
   }                  
   NEWDATA=cbind(NEWDATA,d.frm)
-  Covar.pos=as.matrix(vcov(d$model))
-  set.seed(999);Pos.pars.rand=rmvnorm(niter,mean=coef(d$model),sigma=Covar.pos)    
+  if(MDL=='gamm')
+  {
+    Covar.pos=as.matrix(vcov(d$model$gam))
+    Koef=coef(d$model$gam)
+    model=d$model$gam
+  }
+    
+  if(MDL=='glm')
+  {
+    Covar.pos=as.matrix(vcov(d$model))
+    Koef=coef(d$model)
+    model=d$model
+  }
+    
+  set.seed(999);Pos.pars.rand=rmvnorm(niter,mean=Koef,sigma=Covar.pos)    
   MC.preds=matrix(nrow=niter,ncol=length(NEWDATA[,match(Show.pred,names(NEWDATA))]))
   
   for(n in 1:niter)
   {
-    model=d$model
+    
     model$coefficients=Pos.pars.rand[n,]
     a=predict(model,newdata=NEWDATA,type='response',se.fit=T)
     if(log.var=="YES") Pred=exp(a$fit+(a$se.fit^2)/2)  #apply bias correction for log transf
@@ -674,19 +727,7 @@ fun.plt.pred=function(d,Show.pred,normalised,PredictorS,MAIN,log.var,Cx,YLIM,Cx.
     }
     dat.plt=dat.plt[order(dat.plt$yr),]
   }
-  
-  if(is.null(YLIM)) YLIM=c(min(dat.plt$LowCI,na.rm=T),max(dat.plt$UppCI,na.rm=T))
-  
-  with(dat.plt,plot(yr,MeAn,pch=19,main="",xlab="",ylab="",
-                    cex=1.25,cex.axis=1.25,ylim=YLIM))
-  #with(dat.plt,plot(yr,MeAn,pch=19,main=MAIN,xlab="",ylab="",
-  #                  cex=1.25,xaxt="n",cex.axis=1.25,ylim=YLIM))
-  with(dat.plt,arrows(x0=yr, y0=LowCI, x1=yr, y1=UppCI,code = 3,angle=90,length=.025))
-  #axis(1,dat.plt$yr,F,tck=-0.02)
-  #with(dat.plt,axis(1,seq(yr[1],yr[length(yr)],5),F,tck=-0.05))
-  #if(i %in%c(3,6)) with(dat.plt,axis(1,seq(yr[1],
-  #     yr[length(yr)],5),seq(yr[1],yr[length(yr)],5),tck=-0.05,cex.axis=1.25))
-  mtext(MAIN,3,cex=1.25)
+  return(dat.plt)
 }
 
 #Plot year predictions
@@ -872,10 +913,16 @@ fn.viol.box=function(d,byzone,filcol=NULL,resp.vars)
     dplyr::select(c(resp.vars,YEAR,ZONE))%>%
     mutate(YEAR=as.character(YEAR))%>%
     gather(Indicator,Value,-c(YEAR,ZONE))%>%
-    mutate(Indicator=case_when(Indicator=="Prop.Disc"~"Proportion of discards",
+    mutate(Indicator=case_when(Indicator=="FnRich_morph"~"Functional richness (morph.)",
+                               Indicator=="FnRich_ecol"~"Functional richness (ecol.)",
                                Indicator=="MTL"~"Mean trophic level",
                                Indicator=="MML"~"Mean maximum length",
                                Indicator=="MeanML"~"Mean length",
+                               Indicator=="Prop.Disc"~"Proportion of discards",
+                               Indicator=="MaxAge"~"Maximum age",
+                               Indicator=="Age.mat.prop"~"Proportion mature",
+                               Indicator=="K"~"Growth coefficient",
+                               Indicator=="MaxLen"~"Maximum length",
                                TRUE~Indicator))
   
   Yr.lev=seq(min(d$YEAR),max(d$YEAR))
@@ -909,14 +956,15 @@ fn.viol.box=function(d,byzone,filcol=NULL,resp.vars)
 }
 
 #Function for calculating ecological indicators
-fn.calc.ecol.ind=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1)
+fn.calc.ecol.ind=function(DaTA,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1)
 {
     #Define years to use
     if(Drop.yrs=="YES")DaTA=subset(DaTA,!YEAR%in%as.character(1993:1999))
     
     #select shots with a minimum number of individuals
-    N.ind.shot=aggregate(INDIVIDUALS~SHEET_NO,DaTA,sum)
-    N.ind.shot=subset(N.ind.shot,INDIVIDUALS>=Min.individuals)
+    DaTA$ind.dummy=1
+    N.ind.shot=aggregate(ind.dummy~SHEET_NO,DaTA,sum)
+    N.ind.shot=subset(N.ind.shot,ind.dummy>=Min.individuals)
     DaTA=subset(DaTA,SHEET_NO%in%unique(N.ind.shot$SHEET_NO))
     
     # 3.1.2 Diversity and ecosystem indicators
@@ -1053,6 +1101,128 @@ fn.calc.ecol.ind=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,TE=0.
       DATA.shots.diversity=subset(DATA.shots.diversity,MaxLen>0)
     }
     
+    if("FnRich_ecol"%in%resp.vars)  #takes 6 mins for Logbook
+    {
+      #traits data set
+      dd=DaTA[,match(c('SPECIES',traits_ecol),names(DaTA))]%>%distinct()%>%filter(SPECIES%in%colnames(Dat.y))
+      DrOp=which(is.na(dd), arr.ind=TRUE)
+      DrOp=as.character(dd[DrOp[,1],'SPECIES'])
+      traits_sp=dd%>%filter(!SPECIES%in%DrOp)
+      row.names(traits_sp)=traits_sp$SPECIES
+      traits_sp=traits_sp%>%    
+        dplyr::select(-SPECIES)
+      #convert to all numeric (needed for fd_fric from fundiversity package)
+      needed=FALSE
+      if(needed)
+      {      gg=colnames(traits_sp)
+      for(g in 1:length(gg))
+      {
+        if(!is.numeric(traits_sp[,g]))
+        {
+          UU=traits_sp[,g]
+          U=unique(UU)  #ACA convert character to numeric
+          Riplase=data.frame(U,1:length(U))
+          Nm=colnames(traits_sp)[g]
+          names(Riplase)=c(Nm,'Rep')
+          UU=data.frame(UU)
+          names(UU)=Nm
+          UU=UU%>%left_join(Riplase,by=Nm)
+          traits_sp[,g]=UU$Rep
+        }
+      }
+      traits_sp=traits_sp%>%  
+        as.matrix()}
+
+      #abundance data set
+      site_sp=Dat.y[,-match(DrOp,names(Dat.y))]
+      site_sp=as.matrix(site_sp)
+      rownames(site_sp)=paste('Site',1:nrow(site_sp))
+      
+      #use only species accounting for 95% of catch as very rare species stuff up calculations
+      CumS=rev(sort(colSums(site_sp)))
+      CumS1=cumsum(CumS/sum(CumS))
+      dis.sp=names(which(CumS1<0.99))
+      dis.sp=subset(dis.sp,!dis.sp%in%rownames(traits_sp)[(apply(traits_sp, 1, function(r) any(r %in% '')))])
+      dis.sp=subset(dis.sp,!dis.sp%in%rownames(traits_sp)[(apply(traits_sp, 1, function(r) any(is.na(r))))])
+      traits_sp1=traits_sp[match(dis.sp,rownames(traits_sp)),]
+      site_sp1=site_sp[,match(dis.sp,colnames(site_sp))]
+      
+      #calculate functional diversity
+      for(g in 1:ncol(traits_sp1)) if(!is.numeric(traits_sp1[,g])) traits_sp1[,g]=as.factor(traits_sp1[,g])
+      system.time({ex1 <- dbFD(traits_sp1, site_sp1)}) 
+      Dat$FnRich_ecol=ex1$FRic
+      
+      #Add to data set  
+      DATA.shots.diversity=DATA.shots.diversity%>%left_join(Dat%>%dplyr::select(SHEET_NO,FnRich_ecol),by=c("SHEET_NO"))
+      #DATA.shots.diversity=subset(DATA.shots.diversity,!is.na(FnRich_ecol))
+      
+    }
+    
+    if("FnRich_morph"%in%resp.vars)
+    {
+      #traits data set
+      dd=DaTA[,match(c('SPECIES',traits_morph),names(DaTA))]%>%distinct()%>%filter(SPECIES%in%colnames(Dat.y))
+      DrOp=which(is.na(dd), arr.ind=TRUE)
+      DrOp=as.character(dd[DrOp[,1],'SPECIES'])
+      traits_sp=dd%>%filter(!SPECIES%in%DrOp)
+      row.names(traits_sp)=traits_sp$SPECIES
+      traits_sp=traits_sp%>%    
+        dplyr::select(-SPECIES)
+      #convert to all numeric (needed for fd_fric from fundiversity package)
+      needed=FALSE
+      if(needed)
+      {      gg=colnames(traits_sp)
+      for(g in 1:length(gg))
+      {
+        if(!is.numeric(traits_sp[,g]))
+        {
+          UU=traits_sp[,g]
+          U=unique(UU)  #ACA convert character to numeric
+          Riplase=data.frame(U,1:length(U))
+          Nm=colnames(traits_sp)[g]
+          names(Riplase)=c(Nm,'Rep')
+          UU=data.frame(UU)
+          names(UU)=Nm
+          UU=UU%>%left_join(Riplase,by=Nm)
+          traits_sp[,g]=UU$Rep
+        }
+      }
+      traits_sp=traits_sp%>%  
+        as.matrix()}
+      
+      #abundance data set
+      site_sp=Dat.y[,-match(DrOp,names(Dat.y))]
+      site_sp=as.matrix(site_sp)
+      rownames(site_sp)=paste('Site',1:nrow(site_sp))
+      
+      #use only species accounting for 95% of catch as very rare species stuff up calculations
+      CumS=rev(sort(colSums(site_sp)))
+      CumS1=cumsum(CumS/sum(CumS))
+      dis.sp=names(which(CumS1<0.99))
+      dis.sp=subset(dis.sp,!dis.sp%in%rownames(traits_sp)[(apply(traits_sp, 1, function(r) any(r %in% '')))])
+      dis.sp=subset(dis.sp,!dis.sp%in%rownames(traits_sp)[(apply(traits_sp, 1, function(r) any(is.na(r))))])
+      traits_sp1=traits_sp[match(dis.sp,rownames(traits_sp)),]
+      site_sp1=site_sp[,match(dis.sp,colnames(site_sp))]
+      
+      #remove 0 species sites
+      s=site_sp1
+      s[s>0]=1
+      b=rowSums(s)
+      id=which(b==0)
+      if(length(id)>0)site_sp1=site_sp1[-id,]
+      
+      #calculate functional diversity
+      for(g in 1:ncol(traits_sp1)) if(!is.numeric(traits_sp1[,g])) traits_sp1[,g]=as.factor(traits_sp1[,g])
+      system.time({ex1 <- dbFD(traits_sp1, site_sp1)}) 
+      dummy=Dat
+      if(length(id)>0)dummy=dummy[-id,]
+      dummy$FnRich_morph=ex1$FRic
+      
+      #Add to data set  
+      DATA.shots.diversity=DATA.shots.diversity%>%left_join(dummy%>%dplyr::select(SHEET_NO,FnRich_morph),by=c("SHEET_NO"))
+      #DATA.shots.diversity=subset(DATA.shots.diversity,!is.na(FnRich_morph))
+    }
+    
     #Remove boats with less than Min.recs
     AA=sort(table(DATA.shots.diversity$BOAT))
     AA=AA[AA>Min.recs]
@@ -1073,295 +1243,216 @@ fn.calc.ecol.ind=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,TE=0.
 }
 
 #Function for looping over different observer data sets
-fn.loop.over.obsrvr.data=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars)
+fn.apply.model=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,
+                        do.data.mining=FALSE,do.glm=FALSE,do.gamm=TRUE,ADD.INTER)
 {
-
-  #ACA  convert this function in the estimation function
-  
-  #run model
-  Store.mod.out.observer=vector('list',length(resp.vars))
-  names(Store.mod.out.observer)=resp.vars
-  
-  #glm approach
-  for(i in 1:n.rv)
+  #1. run model
+  Store.mod.out=vector('list',length(resp.vars))
+  names(Store.mod.out)=resp.vars
+  n.rv=length(resp.vars)
+  Res.var.in.log=rep("NO",n.rv)
+    #gamm
+  if(do.gamm)
   {
-    Store.mod.out.observer[[i]]=Mod.fn.glm(d=DATA.shots.diversity,
-                                           ResVar=resp.vars[i],Expl.vars=Expl.varS,
-                                           Predictrs=Predictors,FactoRs=FactoRS,
-                                           OFFSET=OFFSETT,
-                                           log.var=Res.var.in.log[i],add.inter="NO",
-                                           MixedEff=MixedEff)
+    for(i in 1:n.rv)
+    {
+      Store.mod.out[[i]]=Mod.fn.gamm(d=DaTA,
+                                     ResVar=resp.vars[i],
+                                     Expl.vars=subset(Expl.varS,Expl.varS%in%idvarS),
+                                     Predictrs=subset(Predictors,Predictors%in%idvarS),
+                                     FactoRs=FactoRS,
+                                     OFFSET=OFFSETT,
+                                     log.var=Res.var.in.log[i],
+                                     add.inter=ADD.INTER,
+                                     MixedEff=MixedEff,
+                                     temporal.autocorr=FALSE)  #not needed, no strong pattern, see '#check autocorrelation'
+    }
+  }
+    #glm
+  if(do.glm)
+  {
+    for(i in 1:n.rv)
+    {
+      Store.mod.out[[i]]=Mod.fn.glm(d=DaTA,
+                                     ResVar=resp.vars[i],
+                                     Expl.vars=Expl.varS,
+                                     Predictrs=Predictors,
+                                     FactoRs=FactoRS,
+                                     OFFSET=OFFSETT,
+                                     log.var=Res.var.in.log[i],
+                                     add.inter="YES",
+                                     MixedEff=MixedEff)  
+    }
+  }
+    #data mining
+  if(do.data.mining)
+  {
+    for(i in 1:n.rv)Store.mod.out[[i]]=Mod.fn.mining(d=DATA.shots.diversity,ResVar=resp.vars[i],
+                      Predictrs=Predictors,Y.type="Continuous",Prop.train=.7,ALL.models="NO",nboot=1)
+    
   }
   
-  #data mining
-  #system.time(for(i in 1:n.rv)Store.mod.out.observer[[i]]=Mod.fn.mining(d=DATA.shots.diversity,ResVar=resp.vars[i],
-  #                   Predictrs=Predictors,Y.type="Continuous",Prop.train=.7,ALL.models="NO",nboot=1))
-  
-  #Anova tables
+  #2. Fit 
+  if(do.gamm)
+  {
+    for(i in 1:n.rv)
+    {
+      Modl=Store.mod.out[[i]]$model
+      
+      fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"continuous",sep="_"),2000,2000) 
+      par(mfcol=c(2,2))
+      plot(Modl$gam,pages=1)
+      dev.off()
+      
+      fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"factor",sep="_"),2000,2000)
+      vis.gam(Modl$gam)
+      dev.off()
+      
+      #gam.check(Modl$gam,pages=1)
+      fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"gamm_lme",sep="_"),2000,2000)
+      fv <- exp(fitted(Modl$lme)) ## predicted values (including re)
+      rsd <- (Modl$gam$y - fv)/sqrt(fv) ## Pearson residuals (Poisson case)
+      op <- par(mfrow=c(1,2))
+      qqnorm(rsd)
+      plot(fv^.5,rsd)
+      dev.off()
+      
+      fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"autocorrelation",sep="_"),2000,2000)
+      par(mfcol=c(2,1))
+      acf(residuals(Modl$gam),main="raw residual ACF (gamm)") 
+      acf(residuals(Modl$lme),main="raw residual ACF (lme)")
+      dev.off()
+
+    }
+  }
+  if(do.glm)
+  {
+    for(i in 1:n.rv)
+    {
+      fn.fig(paste("GLM_Fit_Observer",names(Store.mod.out)[i],sep="_"),2000,2000) 
+      par(mfcol=c(2,2))
+      plot(Store.mod.out[[i]]$model)
+      dev.off()
+    }
+  }
+
+  #3. Anova tables
   TABL=vector('list',length(resp.vars))
   names(TABL)=resp.vars
-  
   for(i in 1:n.rv)
   {
-    Modl=Store.mod.out.observer[[i]]$model
-    if(is.na(MixedEff))
+    Modl=Store.mod.out[[i]]$model
+    if(do.gamm)
     {
       #each term
-      Anova.tab=anova(Modl, test = "Chisq")
-      n=2:length(Anova.tab$Deviance)
-      Term.dev.exp=100*(Anova.tab$Deviance[n]/Modl$null.deviance)
-      names(Term.dev.exp)=rownames(Anova.tab)[n]
+      Anova.tab=anova(Modl$gam)
       
-      #nice table
-      Anov.tab=as.data.frame.matrix(Anova.tab)
-      Term.tab=data.frame(Percent.dev.exp=Term.dev.exp)
-      Anova.tab=Anova.tab[-1,match(c("Deviance","Pr(>Chi)"),names(Anova.tab))]
-      Anova.tab=cbind(Anova.tab,Term.tab)
-      Anova.tab=Anova.tab[,-match("Deviance",names(Anova.tab))]
-      Anova.tab$"Pr(>Chi)"=ifelse(Anova.tab$"Pr(>Chi)"<0.001,"<0.001",round(Anova.tab$"Pr(>Chi)",3))
-      Total=Anova.tab[1,]
-      Total$"Pr(>Chi)"=""
-      Total$Percent.dev.exp=sum(Anova.tab$Percent.dev.exp)
-      rownames(Total)="Total"
-      Anova.tab=rbind(Anova.tab,Total)
-      Anova.tab$Percent.dev.exp=round(Anova.tab$Percent.dev.exp,2)
+      Anova.smoothers=Anova.tab$s.table%>%
+        data.frame()%>%
+        tibble::rownames_to_column(var = "Term")%>%
+        relocate(Term)%>%
+        mutate(p.value=format(p.value, scientific = T, big.mark = ","),
+               across(where(is.numeric), round, 3))
+      Anova.factors=Anova.tab$pTerms.table%>%
+        data.frame()%>%
+        rename(edf=df)%>%
+        mutate(Ref.df=NA)%>%
+        tibble::rownames_to_column(var = "Term")%>%
+        relocate(names(Anova.smoothers))%>%
+        mutate(p.value=format(p.value, scientific = T, big.mark = ","),
+               across(where(is.numeric), round, 3))
+      
+      Anova.tab=rbind(Anova.factors,Anova.smoothers)
+    }
+    if(do.glm)
+    {
+      if(is.na(MixedEff))
+      {
+        #each term
+        Anova.tab=anova(Modl, test = "Chisq")
+        n=2:length(Anova.tab$Deviance)
+        Term.dev.exp=100*(Anova.tab$Deviance[n]/Modl$null.deviance)
+        names(Term.dev.exp)=rownames(Anova.tab)[n]
+        
+        #nice table
+        Anov.tab=as.data.frame.matrix(Anova.tab)
+        Term.tab=data.frame(Percent.dev.exp=Term.dev.exp)
+        Anova.tab=Anova.tab[-1,match(c("Deviance","Pr(>Chi)"),names(Anova.tab))]
+        Anova.tab=cbind(Anova.tab,Term.tab)
+        Anova.tab=Anova.tab[,-match("Deviance",names(Anova.tab))]
+        Anova.tab$"Pr(>Chi)"=ifelse(Anova.tab$"Pr(>Chi)"<0.001,"<0.001",round(Anova.tab$"Pr(>Chi)",3))
+        Total=Anova.tab[1,]
+        Total$"Pr(>Chi)"=""
+        Total$Percent.dev.exp=sum(Anova.tab$Percent.dev.exp)
+        rownames(Total)="Total"
+        Anova.tab=rbind(Anova.tab,Total)
+        Anova.tab$Percent.dev.exp=round(Anova.tab$Percent.dev.exp,2)
+      }
+      if(!is.na(MixedEff))
+      {
+        Dev.ex.fixed.and.fixed_random=r.squaredGLMM(Modl)
+        Anova.tab=as.data.frame.matrix(Anova(Modl))
+        dd=Anova.tab[1:3,]
+        dd[,]=""
+        row.names(dd)=c("","r2_fixed_effects","r2_fixed&random_effects")
+        dd[2:3,1]=Dev.ex.fixed.and.fixed_random
+        Anova.tab=rbind(Anova.tab,dd)
+      }
+    }
+    
+    TABL[[i]]=Anova.tab%>%
+                mutate(Indicator=names(TABL)[i])%>%
+                relocate(Indicator)
+  }
+  TABL=do.call(rbind,TABL)
+  if(do.gamm)
+  {
+    #export anova tables as word doc   
+    Export.tbl(WD=getwd(),Tbl=TABL,Doc.nm=paste("Anova.table",dat.nm,sep="_"))
+  }
+  if(do.glm)
+  {
+    if(is.na(MixedEff))
+    {
+      LBL_1st=c(1,rep(2,length(resp.vars)))
+      LBL_2nd=c("",rep(c("P","% dev. expl."),length(resp.vars)))
     }
     if(!is.na(MixedEff))
     {
-      Dev.ex.fixed.and.fixed_random=r.squaredGLMM(Modl)
-      Anova.tab=as.data.frame.matrix(Anova(Modl))
-      dd=Anova.tab[1:3,]
-      dd[,]=""
-      row.names(dd)=c("","r2_fixed_effects","r2_fixed&random_effects")
-      dd[2:3,1]=Dev.ex.fixed.and.fixed_random
-      Anova.tab=rbind(Anova.tab,dd)
+      LBL_1st=c(1,rep(3,length(resp.vars)))
+      LBL_2nd=c("",rep(c("Chisq","Df","P"),length(resp.vars)))
     }
-    TABL[[i]]=Anova.tab
+    
+    #export anova tables as word doc
+    Export.tbl(WD=getwd(),Tbl=TABL,Doc.nm=paste("Anova.table",dat.nm,sep="_"),caption=NA,paragph=NA,
+               HdR.col='black',HdR.bg='white',Hdr.fnt.sze=10,Hdr.bld='normal',body.fnt.sze=10,
+               Zebra='NO',Zebra.col='grey60',Grid.col='black',
+               Fnt.hdr= "Times New Roman",Fnt.body= "Times New Roman",
+               HDR.names=c('TERM', resp.vars),
+               HDR.span=LBL_1st,
+               HDR.2nd=LBL_2nd)
   }
-  
-  TABL=do.call(cbind,TABL)
-  TABL=cbind(TERM=row.names(TABL),TABL)
-  
-  if(is.na(MixedEff))
-  {
-    LBL_1st=c(1,rep(2,length(resp.vars)))
-    LBL_2nd=c("",rep(c("P","% dev. expl."),length(resp.vars)))
-  }
-  
-  if(!is.na(MixedEff))
-  {
-    LBL_1st=c(1,rep(3,length(resp.vars)))
-    LBL_2nd=c("",rep(c("Chisq","Df","P"),length(resp.vars)))
-  }
-  #export anova tables as word doc
-  Export.tbl(WD=getwd(),Tbl=TABL,Doc.nm=paste("Anova.table.obs",dat.nm,sep="_"),caption=NA,paragph=NA,
-             HdR.col='black',HdR.bg='white',Hdr.fnt.sze=10,Hdr.bld='normal',body.fnt.sze=10,
-             Zebra='NO',Zebra.col='grey60',Grid.col='black',
-             Fnt.hdr= "Times New Roman",Fnt.body= "Times New Roman",
-             HDR.names=c('TERM', resp.vars),
-             HDR.span=LBL_1st,
-             HDR.2nd=LBL_2nd)
-  
-  #Plot model fit
+    
+  #4. Predictions
+  if(do.glm) MDL='glm'
+  if(do.gamm) MDL='gamm'
+  Store.preds=vector('list',length(resp.vars))
+  names(Store.preds)=resp.vars
   for(i in 1:n.rv)
   {
-    fn.fig(paste("GLM_Fit_Observer",names(Store.mod.out.observer)[i],sep="_"),2000,2000) 
-    par(mfcol=c(2,2))
-    plot(Store.mod.out.observer[[i]]$model)
-    dev.off()
+    aa=fun.pred(d=Store.mod.out[[i]],
+                Show.pred="YEAR",
+                normalised=normalised,
+                PredictorS=subset(Predictors,Predictors%in%idvarS),
+                log.var=Res.var.in.log[i],
+                MDL=MDL)
+    Store.preds[[i]]=aa%>%mutate(Indicator=resp.vars[i],
+                                 LowCI=ifelse(LowCI<0,0,LowCI),
+                                 MeAn=ifelse(MeAn<0,0,MeAn))
+    rm(aa)
   }
   
-  
-  #Plot diversity and ecosystem indices
-  #note: present in relative terms as we are interested in the trend
-  fn.fig(paste("Div & Eco indices.observer_normalised",dat.nm,sep="_"),1800,2000)  
-  smart.par(n.plots=length(resp.vars),MAR=c(1.75,3.5,1.5,.1),OMA=c(3,1,.3,2),MGP=c(1,.8,0))
-  #loop over each index
-  for(i in 1:length(Store.mod.out.observer))
-  {
-    fun.plt.pred(d=Store.mod.out.observer[[i]],Show.pred="YEAR",normalised=normalised,
-                 PredictorS=Predictors,MAIN=Main.title[i],
-                 log.var=Res.var.in.log[i],Cx=1.125,YLIM=NULL,Cx.axs=1.35)
-  }
-  mtext("Year",1,outer=T,cex=1.5,line=1.75)
-  mtext("Relative value",2,-.75,outer=T,cex=1.5,las=3)
-  dev.off()
-  
-  
-  #Observer effort used
-  # if(dat.nm=="BC")
-  # {
-  #   Annual.eff=aggregate(EFFORT~YEAR,DATA.shots.diversity,sum,na.rm=T)
-  #   Yrs.all=as.numeric(sort(Annual.eff$YEAR))
-  #   Yrs.all=seq(Yrs.all[1],Yrs.all[length(Yrs.all)])
-  #   misn.yr=Yrs.all[which(!Yrs.all%in%as.numeric(Annual.eff$YEAR))]
-  #   ADD=matrix(NA,nrow=length(misn.yr),ncol=ncol(Annual.eff))
-  #   colnames(ADD)=colnames(Annual.eff)
-  #   ADD=as.data.frame(ADD)
-  #   ADD$YEAR=misn.yr
-  #   Annual.eff=rbind(Annual.eff,ADD)  
-  #   Annual.eff=Annual.eff[order(Annual.eff$YEAR),]  
-  #   
-  #   fn.fig(paste("Observers Effort",dat.nm,sep="_"),1500,1500)  
-  #   par(las=1,mar=c(3.5,3.5,1.5,.1),oma=c(1,1,.3,2),mgp=c(2.1,.7,0))
-  #   plot(Annual.eff$YEAR,Annual.eff$EFFORT,type='l',
-  #        ylab='Effort',xlab='Year',cex.lab=1.6)
-  #   dev.off()
-  # }
-  
-  
-  #3.1.3 Bycatch patterns     
-  #note: for consistency, use same records as for indices
-  Bycatch=subset(DaTA,FATE%in%c("C","D") &SHEET_NO%in%unique(DATA.shots.diversity$SHEET_NO) ) 
-  Bycatch$Discard=with(Bycatch,ifelse(FATE=="D",1,0))
-  
-  
-  #Is there a change in what prortion is discarded by species?  
-  Disc=aggregate(Discard~YEAR+SPECIES,Bycatch,sum)
-  Tot= aggregate(INDIVIDUALS~YEAR+SPECIES,Bycatch,sum)
-  Disc=merge(Disc,Tot,by=c("YEAR","SPECIES"),all=T)
-  Disc$Prop=Disc$Discard/Disc$INDIVIDUALS
-  dummy=as.numeric(sort(unique(Disc$YEAR)))
-  all.yrs=dummy[1]:dummy[length(dummy)]
-  msn.yrs=all.yrs[which(!all.yrs%in%dummy)]
-  dummy=Disc[1:length(msn.yrs),]
-  dummy$YEAR=msn.yrs
-  dummy$Prop=NA
-  Disc=rbind(Disc,dummy)
-  Disc=Disc[order(Disc$YEAR),]
-  
-  wide <- reshape(Disc[,-match(c("Discard","INDIVIDUALS"),names(Disc))], v.names = "Prop", idvar = "SPECIES",
-                  timevar = "YEAR", direction = "wide")
-  colnames(wide)=gsub(paste("Prop",".",sep=""), "", names(wide))
-  wide[is.na(wide)]="transparent"
-  wide[wide=="1"]="black"
-  wide[wide=="0"]="grey60"
-  xx=as.numeric(colnames(wide)[-1])
-  wide=wide[order(wide$SPECIES),]
-  
-  fn.fig("Discard_species_by_yr",1200,2400) 
-  par(las=1,mar=c(1,2,0,0),oma=c(1.5,1,0,0),mgp=c(1,.6,0),cex.lab=1.25)
-  plot(xx,rep(0,length(xx)),pch=19,col=unlist(wide[1,2:ncol(wide)]),cex=.85,ylab="",xlab="",yaxt='n',ylim=c(0,nrow(wide)+1))
-  for(n in 2:nrow(wide)) points(xx,rep(n-1,length(xx)),pch=19,cex=.85,col=unlist(wide[n,2:ncol(wide)]))
-  axis(2,0:(nrow(wide)-1),wide$SPECIES,cex.axis=.4)
-  mtext("Species",2,1.8,cex=1.5,las=3)
-  mtext("Year",1,1.5,cex=1.5)
-  legend('top',c("Discarded","Retained"),bty='n',pch=19,col=c("black","grey60"),horiz=T,cex=1.25)
-  dev.off()
-  
-  
-  #set factors
-  for(x in 1:length(FactoRS)) Bycatch[,match(FactoRS[x],names(Bycatch))]=as.factor(Bycatch[,match(FactoRS[x],names(Bycatch))])
-  
-  #Binominal GLM
-  bycatch.model=glm(Discard ~ YEAR + BLOCK + BOAT + MONTH + BOTDEPTH,data=Bycatch,family=binomial)
-  
-  #Binominal GLM  
-  Bycatch.glm=fn.reshp(d=Bycatch,Y=ResVar,TimeVar="FATE",IdVAR=idvarS) 
-  Bycatch.glm$Tot=Bycatch.glm$D+Bycatch.glm$C
-  Bycatch.glm$Prop.disc=Bycatch.glm$D/(Bycatch.glm$Tot)
-  Bycatch.glm[is.na(Bycatch.glm)]=0
-  
-  
-  #Anova tables
-  Anova.tab=anova(bycatch.model, test = "Chisq")
-  n=2:length(Anova.tab$Deviance)
-  Term.dev.exp=100*(Anova.tab$Deviance[n]/bycatch.model$null.deviance)
-  names(Term.dev.exp)=rownames(Anova.tab)[n]
-  Anov.tab=as.data.frame.matrix(Anova.tab)
-  Term.tab=data.frame(Percent.dev.exp=Term.dev.exp)
-  Anova.tab=Anova.tab[-1,match(c("Deviance","Pr(>Chi)"),names(Anova.tab))]
-  Anova.tab=cbind(Anova.tab,Term.tab)
-  Anova.tab=Anova.tab[,-match("Deviance",names(Anova.tab))]
-  Anova.tab$"Pr(>Chi)"=ifelse(Anova.tab$"Pr(>Chi)"<0.001,"<0.001",round(Anova.tab$"Pr(>Chi)",3))
-  Total=Anova.tab[1,]
-  Total$"Pr(>Chi)"=""
-  Total$Percent.dev.exp=sum(Anova.tab$Percent.dev.exp)
-  rownames(Total)="Total"
-  Anova.tab=rbind(Anova.tab,Total)
-  Anova.tab$Percent.dev.exp=round(Anova.tab$Percent.dev.exp,2)
-  Anova.tab=cbind(rownames(Anova.tab),Anova.tab)
-  
-  #export anova tables as word doc
-  Export.tbl(WD=getwd(),Tbl=Anova.tab,Doc.nm=paste("Anova.table_Discard_observer.table",dat.nm,sep="_"),caption=NA,paragph=NA,
-             HdR.col='black',HdR.bg='white',Hdr.fnt.sze=10,Hdr.bld='normal',body.fnt.sze=10,
-             Zebra='NO',Zebra.col='grey60',Grid.col='black',
-             Fnt.hdr= "Times New Roman",Fnt.body= "Times New Roman",
-             HDR.names=c('TERM', "P","% dev. expl."),
-             HDR.span=c(1,1,1),
-             HDR.2nd=c("","",""))
-  
-  #show annual predictions of proportion of discards
-  ALL.yrs.bycatch=as.numeric(levels(Bycatch.glm$YEAR))
-  
-  fn.fig(paste("Discard_observer_predicted_prop",dat.nm,sep="_"),2000,2400)  
-  par(mfrow=c(2,1),mai=c(.2,.1,.1,1.1),oma=c(2,4,.1,.1),xpd=TRUE,mgp=c(2.5,.75,0),las=1)
-  
-  #Species composition
-  Bycatch=subset(Bycatch,SHEET_NO%in%unique(Bycatch.glm$SHEET_NO))
-  YrS=sort(unique(as.numeric(as.character(Bycatch$YEAR))))
-  YrS=seq(as.numeric(YrS[1]),as.numeric(YrS[length(YrS)]))
-  d=Bycatch
-  d$SPECIES=as.character(d$SPECIES)
-  d$SP.fate=with(d,ifelse(SPECIES%in%
-                            c("BB.T","DM.T","ER","PJ"),SPECIES,
-                          ifelse(FATE=="C","Comm.","Other")))
-  
-  Tot=aggregate(INDIVIDUALS~SP.fate+YEAR,d,sum)
-  Tot.reshaped=reshape(Tot,v.names = "INDIVIDUALS", idvar =c("YEAR"),
-                       timevar = "SP.fate", direction = "wide")
-  ID=2:ncol(Tot.reshaped)
-  colnames(Tot.reshaped)=gsub(paste("INDIVIDUALS",".",sep=""), "", names(Tot.reshaped))
-  Tot.reshaped$YEAR=as.numeric(as.character(Tot.reshaped$YEAR))
-  Tot.reshaped[,ID]=Tot.reshaped[,ID]/rowSums(Tot.reshaped[,ID],na.rm=T)
-  missn=YrS[which(!YrS%in%Tot.reshaped$YEAR)]
-  ADD=matrix(NA,nrow=length(missn),ncol=ncol(Tot.reshaped))
-  colnames(ADD)=colnames(Tot.reshaped)
-  ADD=as.data.frame(ADD)
-  ADD$YEAR=missn
-  Tot.reshaped=rbind(Tot.reshaped,ADD)
-  Tot.reshaped=Tot.reshaped[order(Tot.reshaped$YEAR),]
-  DD=as.matrix(Tot.reshaped[,2:ncol(Tot.reshaped)])
-  like.this=c("Comm.","Other","PJ","ER","BB.T","DM.T")
-  DD=DD[,match(like.this,colnames(DD))]
-  DD=t(DD)
-  Xmax=ncol(DD)+5
-  a=barplot(DD,plot=F)
-  CLSs=c("black","grey90","grey30","grey80","grey50","grey70")
-  #CLSs=grey.colors(nrow(DD))
-  a=barplot(DD,xaxt='n',cex.axis=1.5,col=CLSs,xlim=c(0,a[length(a)]+1))
-  LEN.nms=row.names(DD)
-  LEN.nms=ifelse(LEN.nms=="BB.T","BB",ifelse(LEN.nms=="DM.T","DM",LEN.nms))
-  legend(a[length(a)]+1,1,rev(LEN.nms), cex=1.15,
-         fill=rev(CLSs),bty='n',title="A)")
-  axis(1,a,F)
-  box()
-  
-  #Predicted discard
-  List=list(model=bycatch.model,data=Bycatch.glm)
-  fun.plt.yr.pred.bycatch(d=List,normalised="NO",PredictorS=Predictors,MAIN="",
-                          log.var="NO",Cx=1.125,YLIM=c(0,1),Cx.axs=1.35)
-  legend(YrS[length(YrS)]+1,1,"", bty='n',title="B)")
-  axis(1,a,YrS,cex.axis=1.5)
-  
-  mtext("Proportion",2,outer=T,cex=1.75,las=3,line=2.2)
-  mtext("Year",1,outer=T,line=1.1,cex=1.75)
-  dev.off()
-  
-  #Species table
-  d$SPEC.tabl=with(d,ifelse(FATE=="C","Comm.",SPECIES))
-  d$SPEC.tabl=with(d,ifelse(SPEC.tabl=="OS","BS",SPEC.tabl))
-  TLB.sp=table(d$SPEC.tabl)
-  TLB.sp=TLB.sp/sum(TLB.sp)
-  TLB.sp=data.frame(SPECIES=names(TLB.sp),PROP=c(TLB.sp))
-  #a=subset(SPECIES.names,Species%in%unique(TLB.sp$SPECIES))
-  a=subset(SPECIES_PCS_FATE,SPECIES%in%unique(TLB.sp$SPECIES))
-  TLB.sp=merge(TLB.sp,a,by="SPECIES",all.x=T)
-  TLB.sp=TLB.sp[order(-TLB.sp$PROP),]
-  TLB.sp$PROP=round(TLB.sp$PROP,3)
-  TLB.sp$PROP=with(TLB.sp,ifelse(PROP<0.001,"<0.001",PROP))
-  TLB.sp=TLB.sp[,match(c("SPECIES","PROP","COMMON_NAME","SCIENTIFIC_NAME"),names(TLB.sp))]
-  write.csv(TLB.sp,paste("Table_species_disc_com",dat.nm,"csv",sep="."),row.names=F)
+  return(do.call(rbind,Store.preds))
 }
 
 #Function for anova commercial
@@ -1485,6 +1576,164 @@ plot.comm=function(dat.plt,MAIN,Cx,YLIM,Cx.axs)
 
 ####################################################################
 #Old stuff
+
+# {
+#   #3.1.3 Bycatch patterns     
+#   #note: for consistency, use same records as for indices
+#   Bycatch=subset(DaTA,FATE%in%c("C","D") &SHEET_NO%in%unique(DATA.shots.diversity$SHEET_NO) ) 
+#   Bycatch$Discard=with(Bycatch,ifelse(FATE=="D",1,0))
+#   
+#   
+#   #Is there a change in what prortion is discarded by species?  
+#   Disc=aggregate(Discard~YEAR+SPECIES,Bycatch,sum)
+#   Tot= aggregate(INDIVIDUALS~YEAR+SPECIES,Bycatch,sum)
+#   Disc=merge(Disc,Tot,by=c("YEAR","SPECIES"),all=T)
+#   Disc$Prop=Disc$Discard/Disc$INDIVIDUALS
+#   dummy=as.numeric(sort(unique(Disc$YEAR)))
+#   all.yrs=dummy[1]:dummy[length(dummy)]
+#   msn.yrs=all.yrs[which(!all.yrs%in%dummy)]
+#   dummy=Disc[1:length(msn.yrs),]
+#   dummy$YEAR=msn.yrs
+#   dummy$Prop=NA
+#   Disc=rbind(Disc,dummy)
+#   Disc=Disc[order(Disc$YEAR),]
+#   
+#   wide <- reshape(Disc[,-match(c("Discard","INDIVIDUALS"),names(Disc))], v.names = "Prop", idvar = "SPECIES",
+#                   timevar = "YEAR", direction = "wide")
+#   colnames(wide)=gsub(paste("Prop",".",sep=""), "", names(wide))
+#   wide[is.na(wide)]="transparent"
+#   wide[wide=="1"]="black"
+#   wide[wide=="0"]="grey60"
+#   xx=as.numeric(colnames(wide)[-1])
+#   wide=wide[order(wide$SPECIES),]
+#   
+#   fn.fig("Discard_species_by_yr",1200,2400) 
+#   par(las=1,mar=c(1,2,0,0),oma=c(1.5,1,0,0),mgp=c(1,.6,0),cex.lab=1.25)
+#   plot(xx,rep(0,length(xx)),pch=19,col=unlist(wide[1,2:ncol(wide)]),cex=.85,ylab="",xlab="",yaxt='n',ylim=c(0,nrow(wide)+1))
+#   for(n in 2:nrow(wide)) points(xx,rep(n-1,length(xx)),pch=19,cex=.85,col=unlist(wide[n,2:ncol(wide)]))
+#   axis(2,0:(nrow(wide)-1),wide$SPECIES,cex.axis=.4)
+#   mtext("Species",2,1.8,cex=1.5,las=3)
+#   mtext("Year",1,1.5,cex=1.5)
+#   legend('top',c("Discarded","Retained"),bty='n',pch=19,col=c("black","grey60"),horiz=T,cex=1.25)
+#   dev.off()
+#   
+#   
+#   #set factors
+#   for(x in 1:length(FactoRS)) Bycatch[,match(FactoRS[x],names(Bycatch))]=as.factor(Bycatch[,match(FactoRS[x],names(Bycatch))])
+#   
+#   #Binominal GLM
+#   bycatch.model=glm(Discard ~ YEAR + BLOCK + BOAT + MONTH + BOTDEPTH,data=Bycatch,family=binomial)
+#   
+#   #Binominal GLM  
+#   Bycatch.glm=fn.reshp(d=Bycatch,Y=ResVar,TimeVar="FATE",IdVAR=idvarS) 
+#   Bycatch.glm$Tot=Bycatch.glm$D+Bycatch.glm$C
+#   Bycatch.glm$Prop.disc=Bycatch.glm$D/(Bycatch.glm$Tot)
+#   Bycatch.glm[is.na(Bycatch.glm)]=0
+#   
+#   
+#   #Anova tables
+#   Anova.tab=anova(bycatch.model, test = "Chisq")
+#   n=2:length(Anova.tab$Deviance)
+#   Term.dev.exp=100*(Anova.tab$Deviance[n]/bycatch.model$null.deviance)
+#   names(Term.dev.exp)=rownames(Anova.tab)[n]
+#   Anov.tab=as.data.frame.matrix(Anova.tab)
+#   Term.tab=data.frame(Percent.dev.exp=Term.dev.exp)
+#   Anova.tab=Anova.tab[-1,match(c("Deviance","Pr(>Chi)"),names(Anova.tab))]
+#   Anova.tab=cbind(Anova.tab,Term.tab)
+#   Anova.tab=Anova.tab[,-match("Deviance",names(Anova.tab))]
+#   Anova.tab$"Pr(>Chi)"=ifelse(Anova.tab$"Pr(>Chi)"<0.001,"<0.001",round(Anova.tab$"Pr(>Chi)",3))
+#   Total=Anova.tab[1,]
+#   Total$"Pr(>Chi)"=""
+#   Total$Percent.dev.exp=sum(Anova.tab$Percent.dev.exp)
+#   rownames(Total)="Total"
+#   Anova.tab=rbind(Anova.tab,Total)
+#   Anova.tab$Percent.dev.exp=round(Anova.tab$Percent.dev.exp,2)
+#   Anova.tab=cbind(rownames(Anova.tab),Anova.tab)
+#   
+#   #export anova tables as word doc
+#   Export.tbl(WD=getwd(),Tbl=Anova.tab,Doc.nm=paste("Anova.table_Discard_observer.table",dat.nm,sep="_"),caption=NA,paragph=NA,
+#              HdR.col='black',HdR.bg='white',Hdr.fnt.sze=10,Hdr.bld='normal',body.fnt.sze=10,
+#              Zebra='NO',Zebra.col='grey60',Grid.col='black',
+#              Fnt.hdr= "Times New Roman",Fnt.body= "Times New Roman",
+#              HDR.names=c('TERM', "P","% dev. expl."),
+#              HDR.span=c(1,1,1),
+#              HDR.2nd=c("","",""))
+#   
+#   #show annual predictions of proportion of discards
+#   ALL.yrs.bycatch=as.numeric(levels(Bycatch.glm$YEAR))
+#   
+#   fn.fig(paste("Discard_observer_predicted_prop",dat.nm,sep="_"),2000,2400)  
+#   par(mfrow=c(2,1),mai=c(.2,.1,.1,1.1),oma=c(2,4,.1,.1),xpd=TRUE,mgp=c(2.5,.75,0),las=1)
+#   
+#   #Species composition
+#   Bycatch=subset(Bycatch,SHEET_NO%in%unique(Bycatch.glm$SHEET_NO))
+#   YrS=sort(unique(as.numeric(as.character(Bycatch$YEAR))))
+#   YrS=seq(as.numeric(YrS[1]),as.numeric(YrS[length(YrS)]))
+#   d=Bycatch
+#   d$SPECIES=as.character(d$SPECIES)
+#   d$SP.fate=with(d,ifelse(SPECIES%in%
+#                             c("BB.T","DM.T","ER","PJ"),SPECIES,
+#                           ifelse(FATE=="C","Comm.","Other")))
+#   
+#   Tot=aggregate(INDIVIDUALS~SP.fate+YEAR,d,sum)
+#   Tot.reshaped=reshape(Tot,v.names = "INDIVIDUALS", idvar =c("YEAR"),
+#                        timevar = "SP.fate", direction = "wide")
+#   ID=2:ncol(Tot.reshaped)
+#   colnames(Tot.reshaped)=gsub(paste("INDIVIDUALS",".",sep=""), "", names(Tot.reshaped))
+#   Tot.reshaped$YEAR=as.numeric(as.character(Tot.reshaped$YEAR))
+#   Tot.reshaped[,ID]=Tot.reshaped[,ID]/rowSums(Tot.reshaped[,ID],na.rm=T)
+#   missn=YrS[which(!YrS%in%Tot.reshaped$YEAR)]
+#   ADD=matrix(NA,nrow=length(missn),ncol=ncol(Tot.reshaped))
+#   colnames(ADD)=colnames(Tot.reshaped)
+#   ADD=as.data.frame(ADD)
+#   ADD$YEAR=missn
+#   Tot.reshaped=rbind(Tot.reshaped,ADD)
+#   Tot.reshaped=Tot.reshaped[order(Tot.reshaped$YEAR),]
+#   DD=as.matrix(Tot.reshaped[,2:ncol(Tot.reshaped)])
+#   like.this=c("Comm.","Other","PJ","ER","BB.T","DM.T")
+#   DD=DD[,match(like.this,colnames(DD))]
+#   DD=t(DD)
+#   Xmax=ncol(DD)+5
+#   a=barplot(DD,plot=F)
+#   CLSs=c("black","grey90","grey30","grey80","grey50","grey70")
+#   #CLSs=grey.colors(nrow(DD))
+#   a=barplot(DD,xaxt='n',cex.axis=1.5,col=CLSs,xlim=c(0,a[length(a)]+1))
+#   LEN.nms=row.names(DD)
+#   LEN.nms=ifelse(LEN.nms=="BB.T","BB",ifelse(LEN.nms=="DM.T","DM",LEN.nms))
+#   legend(a[length(a)]+1,1,rev(LEN.nms), cex=1.15,
+#          fill=rev(CLSs),bty='n',title="A)")
+#   axis(1,a,F)
+#   box()
+#   
+#   #Predicted discard
+#   List=list(model=bycatch.model,data=Bycatch.glm)
+#   fun.plt.yr.pred.bycatch(d=List,normalised="NO",PredictorS=Predictors,MAIN="",
+#                           log.var="NO",Cx=1.125,YLIM=c(0,1),Cx.axs=1.35)
+#   legend(YrS[length(YrS)]+1,1,"", bty='n',title="B)")
+#   axis(1,a,YrS,cex.axis=1.5)
+#   
+#   mtext("Proportion",2,outer=T,cex=1.75,las=3,line=2.2)
+#   mtext("Year",1,outer=T,line=1.1,cex=1.75)
+#   dev.off()
+#   
+#   #Species table
+#   d$SPEC.tabl=with(d,ifelse(FATE=="C","Comm.",SPECIES))
+#   d$SPEC.tabl=with(d,ifelse(SPEC.tabl=="OS","BS",SPEC.tabl))
+#   TLB.sp=table(d$SPEC.tabl)
+#   TLB.sp=TLB.sp/sum(TLB.sp)
+#   TLB.sp=data.frame(SPECIES=names(TLB.sp),PROP=c(TLB.sp))
+#   #a=subset(SPECIES.names,Species%in%unique(TLB.sp$SPECIES))
+#   a=subset(SPECIES_PCS_FATE,SPECIES%in%unique(TLB.sp$SPECIES))
+#   TLB.sp=merge(TLB.sp,a,by="SPECIES",all.x=T)
+#   TLB.sp=TLB.sp[order(-TLB.sp$PROP),]
+#   TLB.sp$PROP=round(TLB.sp$PROP,3)
+#   TLB.sp$PROP=with(TLB.sp,ifelse(PROP<0.001,"<0.001",PROP))
+#   TLB.sp=TLB.sp[,match(c("SPECIES","PROP","COMMON_NAME","SCIENTIFIC_NAME"),names(TLB.sp))]
+#   write.csv(TLB.sp,paste("Table_species_disc_com",dat.nm,"csv",sep="."),row.names=F)
+#   
+# }
+
+
 # 
 # #Function for calculating Diversity indices
 # Div.ind = function(data)
