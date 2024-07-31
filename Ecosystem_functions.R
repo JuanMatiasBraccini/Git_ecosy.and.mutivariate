@@ -13,12 +13,14 @@
 
 
 require(vegan)
-require(BEQI2)
+#require(BEQI2)
 require(asbio)
 require(marindicators)   #see fishingInBalance() margalef() meanTLLandings() etc etc, lots of functions
 library(FD)   #functional diversity
-library(mgcv)
 library(flextable)
+require(ecodist)
+require(mvabund)
+require(mgcv)
 
 #--FUNCTIONS---
 
@@ -283,7 +285,7 @@ Mod.fn.gamm=function(d,ResVar,Expl.vars,Predictrs,FactoRs,OFFSET,log.var,add.int
   
   if(temporal.autocorr) 
   {
-    model=gamm(Formula, correlation = corAR1(), data=d)
+    model=gamm(Formula, correlation = corARMA(form = ~ 1|YEAR, p = 1), data=d)
   }else
   {
     model=gamm(Formula, data=d)
@@ -641,7 +643,7 @@ fn.relative=function(D)
 }
 
 #Plot predictions
-fun.pred=function(d,Show.pred,normalised,PredictorS,log.var,MDL)
+fun.pred=function(d,Show.pred,normalised,PredictorS,log.var,MDL,BY=1)
 {
   #create new data
   Dat=d$data
@@ -649,14 +651,21 @@ fun.pred=function(d,Show.pred,normalised,PredictorS,log.var,MDL)
   if(!is.na(OFFSETT))Other.preds=c(PredictorS[-match("year",PredictorS)],"log.EFFORT")
   
   idPred=match(Show.pred,names(Dat))
-  if(is.factor(Dat[,idPred]))
+  if(any(is.factor(Dat[,idPred])))
   {
     NEWDATA=data.frame(x=sort(unique(as.character(Dat[,idPred]))))
     NEWDATA[,1]=factor(NEWDATA[,1],levels=levels(Dat[,idPred]))
     names(NEWDATA)=Show.pred
   }else
   {
-    NEWDATA=data.frame(x=sort(seq(min(Dat[,idPred]),max(Dat[,idPred]),by=BY)))
+    if(length(idPred)==1)NEWDATA=data.frame(x=sort(seq(min(Dat[,idPred]),max(Dat[,idPred]),by=BY)))
+    if(length(idPred)>1)
+    {
+      NEWDATA=Dat[,idPred]%>%mutate(dummy=paste(round(LATITUDE,2),round(LONGITUDE,2)))%>%
+                                      distinct(dummy,.keep_all = T)%>%
+                                      dplyr::select(-dummy)
+    }
+      
     names(NEWDATA)=Show.pred
   }
   
@@ -687,7 +696,7 @@ fun.pred=function(d,Show.pred,normalised,PredictorS,log.var,MDL)
   }
     
   set.seed(999);Pos.pars.rand=rmvnorm(niter,mean=Koef,sigma=Covar.pos)    
-  MC.preds=matrix(nrow=niter,ncol=length(NEWDATA[,match(Show.pred,names(NEWDATA))]))
+  MC.preds=matrix(nrow=niter,ncol=length(NEWDATA[,match(Show.pred[1],names(NEWDATA))]))
   
   for(n in 1:niter)
   {
@@ -703,15 +712,22 @@ fun.pred=function(d,Show.pred,normalised,PredictorS,log.var,MDL)
                  MEAN=colMeans(MC.preds,na.rm=T),
                  LOW=apply(MC.preds, 2, function(x) quantile(x, 0.025,na.rm=T)),
                  UP=apply(MC.preds, 2, function(x) quantile(x, 0.975,na.rm=T)))
-  names(PRD)[1]=Show.pred
+  names(PRD)[1:length(Show.pred)]=Show.pred
   
   #standardise to a mean score of 1
   if(normalised=="YES") PRD=fn.relative(PRD)
-  XX=as.numeric(as.character(PRD[,match(Show.pred,names(PRD))]))
+  if(length(Show.pred)==1) XX=as.numeric(as.character(PRD[,match(Show.pred,names(PRD))]))
+  if(length(Show.pred)==2)
+  {
+    XX=PRD[,match(Show.pred,names(PRD))]
+    XX=paste(XX[,1],XX[,2])
+    Show.pred=paste(Show.pred,collapse=' ')
+  }
+    
   MeAn=PRD$MEAN
   UppCI=PRD$UP
   LowCI=PRD$LOW
-  dat.plt=data.frame(yr=XX,MeAn=MeAn,UppCI=UppCI,LowCI=LowCI)
+  dat.plt=data.frame(Variable=Show.pred,Value=XX,MeAn=MeAn,UppCI=UppCI,LowCI=LowCI)
   
   #add missing years
   if(Show.pred=="year")
@@ -1265,7 +1281,7 @@ fn.apply.model=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,
                                      log.var=Res.var.in.log[i],
                                      add.inter=ADD.INTER,
                                      MixedEff=MixedEff,
-                                     temporal.autocorr=FALSE)  #not needed, no strong pattern, see '#check autocorrelation'
+                                     temporal.autocorr=FALSE)  #not needed, no strong pattern, see '_autocorrelation' in fit folder
     }
   }
     #glm
@@ -1292,23 +1308,32 @@ fn.apply.model=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,
     
   }
   
-  #2. Fit 
+  #2. Fit diagnostics
   if(do.gamm)
   {
     for(i in 1:n.rv)
     {
+      Da=Store.mod.out[[i]]$data
+      fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"distribution response var",sep="_"),2000,2000) 
+      hist(Da[,match(resp.vars[i],names(Da))],main=resp.vars[i])
+      dev.off()
+      
       Modl=Store.mod.out[[i]]$model
       
       fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"continuous",sep="_"),2000,2000) 
       par(mfcol=c(2,2))
-      plot(Modl$gam,pages=1)
+      plot(Modl$gam,pages=1,all.terms=TRUE)
       dev.off()
       
       fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"factor",sep="_"),2000,2000)
       vis.gam(Modl$gam)
       dev.off()
       
-      #gam.check(Modl$gam,pages=1)
+      fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"fit",sep="_"),2000,2000) 
+      par(mfcol=c(2,2))
+      gam.check(Modl$gam,pages=1)
+      dev.off()
+      
       fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"gamm_lme",sep="_"),2000,2000)
       fv <- exp(fitted(Modl$lme)) ## predicted values (including re)
       rsd <- (Modl$gam$y - fv)/sqrt(fv) ## Pearson residuals (Poisson case)
@@ -1440,12 +1465,31 @@ fn.apply.model=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,
   names(Store.preds)=resp.vars
   for(i in 1:n.rv)
   {
-    aa=fun.pred(d=Store.mod.out[[i]],
+    Year=fun.pred(d=Store.mod.out[[i]],  
                 Show.pred="YEAR",
                 normalised=normalised,
                 PredictorS=subset(Predictors,Predictors%in%idvarS),
                 log.var=Res.var.in.log[i],
                 MDL=MDL)
+    
+    Month=fun.pred(d=Store.mod.out[[i]],
+             Show.pred="MONTH",
+             normalised=normalised,
+             PredictorS=subset(Predictors,Predictors%in%idvarS),
+             log.var=Res.var.in.log[i],
+             MDL=MDL,
+             BY=1)
+    
+    Lat.Long=fun.pred(d=Store.mod.out[[i]],
+                      Show.pred=c("LATITUDE","LONGITUDE"),
+                      normalised=normalised,
+                      PredictorS=subset(Predictors,Predictors%in%idvarS),
+                      log.var=Res.var.in.log[i],
+                      MDL=MDL,
+                      BY=0.5)    
+        
+    aa=rbind(Year,Month,Lat.Long)
+    
     Store.preds[[i]]=aa%>%mutate(Indicator=resp.vars[i],
                                  LowCI=ifelse(LowCI<0,0,LowCI),
                                  MeAn=ifelse(MeAn<0,0,MeAn))
@@ -1573,6 +1617,354 @@ plot.comm=function(dat.plt,MAIN,Cx,YLIM,Cx.axs)
   with(dat.plt,axis(1,yr,F,tck=-0.025))
   with(dat.plt,axis(1,seq(yr[1],yr[length(yr)],5),F,tck=-0.05))
 }
+
+#multivariate analysis
+multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
+                         simper.cumsum=0.85,LGSIZE=12,
+                         All.species.names,
+                         dat.name,do.MDS=FALSE,do.pcoa=TRUE,
+                         do.permanova=FALSE,do.simper=FALSE,do.mvabund=TRUE,
+                         do.gam=FALSE,do.tweedie=FALSE,do.lm=TRUE,
+                         term.form)
+{
+  names(d)=tolower(names(d))
+  
+  what.species=d%>%
+    group_by_at(Def.sp.term)%>%
+    summarise(n=sum(individuals,na.rm=T))%>%
+    spread(year,n,fill=0)%>%
+    ungroup()%>%data.frame
+  what.species$n=rowSums(what.species[,-1])
+
+  what.species=what.species%>%    
+    arrange(-n)%>%
+    mutate(Row=1:n(),
+           Cumktch=cumsum(n),
+           Cumktch=Cumktch/sum(n))
+  
+  if(Group=='95') what.species=what.species%>%mutate(species2=ifelse(Cumktch<=0.95,species,'Other'))
+  if(Group=='Top20') what.species=what.species%>%mutate(species2=ifelse(Row<=20,species,'Other'))
+  what.species=what.species%>%
+    distinct(species,species2)%>%
+    filter(!species2=='Other')
+  
+  
+  d=d%>%
+    left_join(what.species,by=c('species'))%>%
+    filter(!is.na(species2))%>%
+    group_by_at(c(Terms,'species2'))%>%
+    summarise(individuals=sum(individuals,na.rm=T))%>%
+    spread(species2,individuals,fill=0)%>%
+    ungroup()
+  
+  d$ColSum=rowSums(d[-match(Terms,names(d))])
+  d=d%>%filter(ColSum<100)
+  d=d%>%filter(!is.na(ColSum))
+  d=d%>%filter(ColSum>0)
+  if(Transf=='proportion') d[-match(c(Terms,'ColSum'),names(d))]=d[-match(c(Terms,'ColSum'),names(d))]/d$ColSum
+  d=d%>%
+    dplyr::select(-ColSum)%>%
+    data.frame
+  
+  dd = d[,-match(Terms,names(d))]
+  drop.this=which(rowSums(dd)==0)
+  if(length(drop.this)>0) d=d[-drop.this,]
+  rm(dd)
+  rownames(d)=paste0('id.',1:nrow(d))
+  Community = d[,-match(Terms,names(d))]
+  if(Transf=='sqrt')Community = sqrt(Community)
+
+  #1. Ordination
+    #MDS 
+  if(do.MDS)
+  {
+    MDS <- metaMDS(comm = Community, distance = "bray",k=2,trymax=100, trace = FALSE, autotransform = FALSE)
+    MDS_xy <- data.frame(MDS$points)
+    MDS_xy$dummy <- d[,match(Show.term,names(d))]
+    
+    p=ggplot(MDS_xy, aes(MDS1, MDS2, color = dummy)) +
+      geom_point(size=3) +
+      annotate(geom="text", x=0.85*max(MDS_xy$MDS1), y=min(MDS_xy$MDS2), 
+               label=paste("Stress=",round(MDS$stress,3)))+
+      theme_PA(leg.siz=14,axs.t.siz=12,axs.T.siz=14)+
+      theme(legend.position = "top",
+            legend.title = element_blank())+
+      guides(colour = guide_legend(nrow = 3))+
+      xlab('')+ylab('')
+    print(p)
+    ggsave(paste(hndl,'/MDS_',dat.name,'.tiff',sep=""),width = 6,height = 6,compression = "lzw")
+    
+  }
+  
+    #PCOA
+  if(do.pcoa)
+  {
+    Comm=Community
+    Comm$dummy <- d[,match(Show.term,names(d))]
+    Comm=Comm%>%
+      group_by(dummy) %>%
+      summarise_all("mean")
+    
+    Community.bray <- vegan::vegdist(Comm%>%dplyr::select(-dummy), method = "bray") 
+    pcoaVS <- pco(Community.bray, negvals = "zero", dround = 0) 
+    
+    PCOA_xy <-  pcoaVS$vectors[,1:2]
+    PCOA_xy <- as.data.frame(PCOA_xy)
+    PCOA_xy$dummy <- Comm$dummy
+    PCOA_xy$kolor=colorRampPalette(c("cyan4","cornflowerblue", "blue4"))(nrow(PCOA_xy))
+    p=PCOA_xy%>%                 
+      ggplot(aes(x = V1, y = V2)) +
+      geom_point(color = "transparent") +
+      geom_segment(aes(xend = after_stat(lead(x)), yend = after_stat(lead(y)),colour = kolor),
+                   arrow = arrow(length = unit(4, "mm")),linewidth=1.25) +
+      geom_text(aes(label = dummy), size = 5, fontface = 2,alpha=0.6) +
+      labs(x = "PCOA1", y = "PCOA2")+
+      theme_PA(leg.siz=14,axs.t.siz=12,axs.T.siz=14)+
+      theme(legend.position = "none")+scale_colour_identity()
+    print(p)
+    ggsave(paste(hndl,'/PCOA_',dat.name,'.tiff',sep=""),width = 6,height = 6,compression = "lzw")
+    
+  }
+  
+  #2. Multi stats
+    #mvabund
+  if(do.mvabund)
+  {
+    spp_mat <- mvabund(Community)
+    
+    explore.dis=FALSE
+    if(explore.dis)
+    {
+      par(mar = c(2, 10, 2, 2)) # adjusts the margins
+      boxplot(Community, horizontal = TRUE, las = 2, main = "Abundance")
+      meanvar.plot(spp_mat)  #check mean variance relationship
+      plot(spp_mat ~ as.factor(d$year), cex.axis = 0.8, cex = 0.8)  
+      
+      left_join(d %>%
+                  dplyr::select(-c(month,latitude,longitude))%>%
+                  group_by(year) %>%
+                  summarise_all(c(mean))%>%gather(species,mean,-year),
+                d %>%
+                  dplyr::select(-c(month,latitude,longitude))%>%
+                  group_by(year) %>%
+                  summarise_all(c(sd))%>%gather(species,sd,-year),
+                by=c('year','species'))%>%
+        mutate(lower95=mean -1.96*sd,
+               upper95=mean +1.96*sd)%>%
+        ggplot(aes(year,mean))+
+        geom_bar(stat="identity")+
+        facet_wrap(~species,scales='free_y')
+    }
+    Terms.part=d[,match(Terms,names(d))]
+    
+    if(do.gam) #gam doesn't work, bug in function
+    {
+      mod <- manyany(formula=formula(paste('spp_mat',term.form,sep='~')),fn='gam',    
+                     family = gaussian(link = "identity"),data=Terms.part)
+    }
+    if(do.tweedie) #predictions don't work but yields same coefs as lm
+    {
+       mod <- manyany(spp_mat~year+ month+ latitude* longitude,fn="glm",data=Terms.part,
+                      family=tweedie(var.power=1.2, link.power=0), var.power=1.2)  
+      
+    }
+    if(do.lm)
+    {
+      mod <- manylm(formula=formula(paste('spp_mat',term.form,sep='~')),data=Terms.part)
+    }
+    
+    #Predict year effect
+    NEWDATA=data.frame(unique(Terms.part[,Show.term]))
+    colnames(NEWDATA)=Show.term
+    add.dis=Terms.part[,-match(Show.term,names(Terms.part))]%>%summarise_all(mean)%>%summarise_all(round)
+    NEWDATA=cbind(NEWDATA,add.dis)
+
+    Preds=predict(mod, newdata=NEWDATA, se.fit = TRUE,type = "response")
+    
+    Preds.median=Preds$fit%>%data.frame()
+    Preds.se=Preds$se.fit%>%data.frame()
+    names(Preds.se)=names(Preds.median)
+    
+    Preds.median=Preds.median%>%
+      mutate(year=NEWDATA$year)%>%
+      gather(species,Median,-year)
+    Preds.se=Preds.se%>%
+      mutate(year=NEWDATA$year)%>%
+      gather(species,SE,-year)
+    
+    names(All.species.names)=tolower(names(All.species.names))
+    Preds=Preds.median%>%left_join(Preds.se,by=c('year','species'))%>%
+      mutate(lower95=Median-1.96*SE,
+             upper95=Median+1.96*SE,
+             species=str_remove(species, 'X'))%>%
+      left_join(All.species.names,by='species')
+    
+    
+     return(list(mod=mod,Preds=Preds))
+  }
+  
+    #Permanova  
+  if(do.permanova)
+  {
+    # 2.1. overall significance test
+    adon.results<-adonis2(formula(paste('Community',term.form,sep='~')),data=d, method="bray",perm=1e3,parallel=6)
+    write.csv(as.data.frame(adon.results),paste(hndl,'/Permanova table_',dat.name,'.csv',sep=""))
+    
+    # 2.2. multilevel pairwise comparison with adjusted p-values
+    #adonis.pairwise=pairwise.adonis(Community,d[,match(Show.term,names(d))])
+    dummy=pairwise.adonis2(Community~year,data=d)
+    adonis.pairwise=vector('list',(length(dummy)-1))
+    for(qq in 2:length(dummy))
+    {
+      adonis.pairwise[[qq]]=data.frame(Pairs=names(dummy)[[qq]],
+                                       P=dummy[[qq]]$`Pr(>F)`[1])
+    }
+    adonis.pairwise=do.call(rbind,adonis.pairwise)
+    write.csv(adonis.pairwise,paste(hndl,'/Permanova table_pairwise_',dat.name,'.csv',sep=""),row.names = F)
+    
+  }
+  
+    #Simper analysis to identify species that discriminate among groups
+  if(do.simper)
+  {
+    SIMPER <- summary(simper(Community, d%>%pull(Show.term),parallel=7))
+    
+    #1. display species accounting for group differences
+    Get=as.data.frame(str_split(names(SIMPER), "_", simplify = TRUE))%>%
+      mutate(V1.method=sub("\\ .*", "", V1),
+             V2.method=sub("\\ .*", "", V2),
+             V1.zone=sub(".* ", "", V1),
+             V2.zone=sub(".* ", "", V2),
+             id=1:n())%>%
+      filter(!V1.method==V2.method & V1.zone==V2.zone)
+    SIMPER=SIMPER[Get$id]
+    
+    disp.simp=vector('list',length(SIMPER))
+    for(n in 1:length(disp.simp))
+    {
+      disp.simp[[n]]=cbind(d[Show.term],
+                           Community[row.names(SIMPER[[n]]%>%filter(cumsum<=simper.cumsum))])%>%
+        filter(!!sym(Show.term)%in%str_split(names(SIMPER)[n], "_", simplify = TRUE))%>%
+        gather(species,prop,-method.zone,)%>%
+        mutate(groups=names(SIMPER)[n])
+    }
+    disp.simp=do.call(rbind,disp.simp)
+    
+    dis.cls=unique(disp.simp$species)
+    dis.cls=All.species.names%>%
+      filter(COMMON_NAME%in%unique(disp.simp$species))
+    
+    colfunc <- colorRampPalette(Shark.palette)
+    n.col.elasmos=colfunc(length(dis.cls$CAES_Code[dis.cls$CAES_Code<50000]))
+    names(n.col.elasmos)=dis.cls%>%filter(CAES_Code<50000)%>%pull(COMMON_NAME)
+    
+    colfunc <- colorRampPalette(Teleost.palette)
+    n.col.teleos=colfunc(length(dis.cls$CAES_Code[dis.cls$CAES_Code>=50000]))
+    names(n.col.teleos)=dis.cls%>%filter(CAES_Code>=50000)%>%pull(COMMON_NAME)
+    
+    p=disp.simp%>%
+      group_by(method.zone,groups,species)%>%
+      summarise(prop=mean(prop))%>%
+      mutate(method=sub("\\ .*", "", method.zone),
+             zone=sub(".* ", "", method.zone))%>%
+      ggplot(aes(x=method,y=prop, fill=species))+
+      geom_bar(stat="identity", width = 0.5)+
+      facet_wrap(~zone,scales='free_y')+
+      ylab("Average proportion")+xlab("Method")+
+      scale_fill_manual(values=c(n.col.elasmos,n.col.teleos))+
+      theme_PA(str.siz=14,leg.siz=LGSIZE,axs.t.siz=12,axs.T.siz=16)+
+      theme(legend.position = "top",
+            legend.title = element_blank(),
+            plot.margin=unit(c(.1,.5,.1,.1),"cm"))+
+      guides(fill = guide_legend(nrow = 4))
+    print(p)
+    ggsave(paste(hndl,'/Simper_',dat.name,'.tiff',sep=""),width = 6,height = 6,compression = "lzw")
+    
+    
+    SIMPER.out=SIMPER
+    for(s in 1:length(SIMPER.out))
+    {
+      x=SIMPER[[s]]%>%
+        mutate(group=names(SIMPER)[s],
+               species=row.names(SIMPER[[s]]))%>%
+        relocate(group,species, .before=average)
+      x=x%>%
+        filter(cumsum<=simper.cumsum)
+      SIMPER.out[[s]]=x 
+    }
+    write.csv(do.call(rbind,SIMPER.out),paste(hndl,'/Simper table_',dat.name,'.csv',sep=""),row.names = F) 
+  }
+  
+}
+display.multivar.stats=function(mod)
+{
+  # plot(mod)
+  #ANOVA=anova(mod) #overall anova
+  #summary(mod,nBoot=999,test=='LR')
+  #anova(mod, p.uni = "adjusted") #in which species there's a year effect?
+}
+
+
+#Catch composition thru time
+Catch.comp=function(ddd,All.sp,Display)
+{
+  Main=unique(ddd$Dataset)
+  dumi=ddd%>%
+    group_by(SCIENTIFIC_NAME)%>%
+    summarise(Prop=sum(Prop))%>%
+    ungroup()%>%
+    arrange(-Prop)%>%
+    mutate(Cumktch=cumsum(Prop),
+           Tot=sum(Prop),
+           Cumktch2=Cumktch/Tot,
+           SCIENTIFIC_NAME2=ifelse(Cumktch2<=0.95,SCIENTIFIC_NAME,'Other'))%>%
+    left_join(All.sp,by='SCIENTIFIC_NAME')
+  N.other=dumi%>%group_by(SCIENTIFIC_NAME2,Group)%>%tally()%>%filter(SCIENTIFIC_NAME2=='Other')
+  dumi=dumi%>%
+    mutate(SCIENTIFIC_NAME2=case_when(SCIENTIFIC_NAME2=='Other' & Group=='Elasmobranch'~paste0('Other elasmobranchs',' (',N.other%>%filter(Group=='Elasmobranch')%>%pull(n),' species)'),
+                                      SCIENTIFIC_NAME2=='Other' & Group=='Teleost'~paste0('Other teleosts',' (',N.other%>%filter(Group=='Teleost')%>%pull(n),' species)'),
+                                      TRUE~SCIENTIFIC_NAME2))%>%
+    dplyr::select(SCIENTIFIC_NAME,SCIENTIFIC_NAME2,Group)
+  
+  LVLs=dumi%>%arrange(Group,SCIENTIFIC_NAME2)%>%distinct(Group,SCIENTIFIC_NAME2)%>%pull(SCIENTIFIC_NAME2)
+  ddd=ddd%>%
+    left_join(dumi,by='SCIENTIFIC_NAME')%>%
+    mutate(color=ifelse(Group=='Teleost','dodgerblue4','firebrick3'))%>%
+    group_by(SCIENTIFIC_NAME2,YEAR,color,Group)%>%
+    summarise(Prop=sum(Prop,na.rm=T))%>%
+    ungroup()%>%
+    mutate(SCIENTIFIC_NAME2=factor(SCIENTIFIC_NAME2,levels=LVLs))
+  if(Display=='tile')
+  {
+    a=ddd%>%distinct(SCIENTIFIC_NAME2,color)%>%arrange(factor(SCIENTIFIC_NAME2,levels=LVLs))
+    p=ddd%>%
+      rename(Proportion=Prop)%>%
+      ggplot(aes(YEAR, SCIENTIFIC_NAME2 , fill= Proportion)) + 
+      geom_tile()+
+      scale_fill_gradient2(low="lightgoldenrodyellow",mid="darkgoldenrod2", high="brown4",midpoint = mean(range(ddd$Prop)))+
+      ylab('')+xlab('Financial year')+
+      theme_PA(axs.t.siz=10,Ttl.siz=13)+
+      theme(legend.position = 'top',
+            plot.title.position = "plot",
+            axis.text.y = element_text(colour = a%>%pull(color)))
+  }
+  
+  if(Display=='barplot')
+  {
+    p=ddd%>%
+      ggplot(aes(YEAR,Prop,fill=SCIENTIFIC_NAME2))+
+      geom_bar(stat='identity',position="stack")+
+      theme_PA()+
+      theme(legend.position = 'top',
+            legend.title = element_blank())
+  }
+  
+  p=p+ggtitle(Main)
+  return(p)
+}
+
+
+
 
 ####################################################################
 #Old stuff

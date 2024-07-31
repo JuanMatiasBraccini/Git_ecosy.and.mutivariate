@@ -16,20 +16,13 @@
 #           2.2 WA Fisheries commercial data
 #         3. Multivariate analysis
 
-#missing: Deal with imbalance data set   VIP!!
-#         Models (ACA). 
-#             Could combine indicators into one (see notes in Manuscript)
-#             autocorrelation in time-space?
-#             is Year the covariate or the fishery effort??
-#             usesampling effort as offset()
-#         For Multivariate, implement Parks_2019 and look in C:\Matias\Workshops\2019_Primer workshop\2019_PRIMER_workshop.docx
 
 rm(list=ls(all=TRUE))
 
+library(readxl)
 library(maps)
 library(mapdata)
 library(RColorBrewer)
-library(vegan)
 #library(gamlss)
 library(reshape2)
 #library(iNEXT) 
@@ -45,6 +38,7 @@ library(data.table)
 library(tidyverse)
 library(Hmisc)
 library(tictoc)
+library(ggpubr)
 
 #Define working directory
 if(!exists('handl_OneDrive')) source('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias/Analyses/SOURCE_SCRIPTS/Git_other/handl_OneDrive.R')
@@ -102,13 +96,12 @@ Do.jpeg="NO"
 Do.tiff="YES"
 
   #Selection of records
-Min.shts=5 #USe records with at least 5 shots per year-block
+Min.shts=5        #Use records with at least 5 shots per year-block
 Min.shts.sens=c(Min.shts*2)
-Min.recs=10        #minimum number of records per boat to be selected
+Min.recs=10        #select boats with at least this number of records
 Min.individuals=5   #minimum number of individuals per shot to use
-Min.shots.year=50  #minimum number of shots per year
+Min.shots.year=50  #select years with at least this number of shots
 Min.years=3        #minimum number of years with Min.shots.year
-
   #vessel used as mixed effect
 MixedEff="BOAT" 
 
@@ -118,9 +111,10 @@ check.discards=FALSE
   #choose if using commercial data
 do.commercial=TRUE
 combine.daily.monthly=TRUE
-use.NSF=TRUE
+use.NSF=FALSE
+
 get.traits=FALSE  #get life history traits from FishLife
-Start.yr=1975   #before 1989 some species not reported in commercial logbooks; also some species become protected. Interpret results within this caveat
+Min.YEAR=1988     # First year of analysis. before 1988 some species not reported in commercial logbooks; also some species become protected. Interpret results within this caveat
 protected.species=c(8001,10003) 
 names(protected.species)=c("greynurse shark","white shark")
 
@@ -138,7 +132,7 @@ ResVar="INDIVIDUALS"
 MultiVar="SPECIES"
 IDVAR=c("SHEET_NO","YEAR","MONTH","BOTDEPTH","BLOCK","ZONE","BOAT","SKIPPER","MESH_SIZE",
         "BIOREGION","SEASON","EFFORT","LATITUDE","LONGITUDE")   
-Predictors=c("YEAR","BOAT","MONTH","BOTDEPTH","LATITUDE","LONGITUDE") #"BLOCK"
+Predictors=c("YEAR","BOAT","MONTH","LATITUDE","LONGITUDE") #"BLOCK"
 Expl.varS=c("YEAR","BOAT","MONTH","BLOCK","BOTDEPTH","LATITUDE","LONGITUDE")
 FactoRS=Expl.varS[-match(c("BOTDEPTH","LATITUDE","LONGITUDE","MONTH"),Expl.varS)]
 OFFSETT=NA
@@ -146,14 +140,19 @@ OFFSETT=NA
 response.var='cpue'  #use catch rates to calculate indicators
 
   #choose indicators 
-Ecol.Indicators=c("Shannon","Pielou","Simpson","MTL","MML","MeanML","Prop.Disc")
+Ecol.Indicators=c("Shannon","Pielou","Simpson","MTL","MML","Prop.Disc")
 # FIB not applicable to Effort managed fishery (if TL is maintained by catches reduced due to Management
 #                                               then FIB is <0)
-traits=c("MaxAge","Age.mat.prop","K","MaxLen")
+traits=c("Age.mat.prop","K") #"MaxAge" & "MaxLen" used in Functional diversity
 
 Functional.diversity=c("FnRich_morph","FnRich_ecol")
 traits_ecol=c('Trophic.level.fishbase','Habitat','Movement.scale','Feeding.group')  
-traits_morph=c('Body.shape','Maximum.size','Body.depth','Head.length','Eye.diameter','Pre.orbital.length')
+traits_morph=c('Body.shape','Maximum.size','tmax','Body.depth','Head.length','Eye.diameter','Pre.orbital.length')
+
+
+do.multivariate=FALSE  #focus only on ecological indicators
+
+display.catch.effort=FALSE
 
 
 # 3 Procedure section-----------------------------------------------------------------------
@@ -406,11 +405,11 @@ DATA=subset(DATA,select=c(SHEET_NO,YEAR,MONTH,BLOCK,BOAT,SKIPPER,SPECIES,FATE,
                           PCS,SCIENTIFIC_NAME,Fishery,Loo,K,tmax,tm,Lm,Body.shape,Habitat,Movement.scale,
                           Maximum.size,Body.depth,Head.length,Eye.diameter,Pre.orbital.length,Feeding.group,Trophic.level.fishbase))
 
-#remove records from shots with less than Min.shts per year-block
+#remove records with less than Min.shts per year-block
 d=DATA[!duplicated(DATA$SHEET_NO),]
 d$N=1
 d1=aggregate(N~BLOCK+YEAR,d,sum)
-N.base.case=subset(d1,N>Min.shts)
+N.base.case=subset(d1,N>=Min.shts)
 N.base.case$Yr.blk=with(N.base.case,paste(YEAR,BLOCK,sep="_"))
 DATA$Yr.blk=with(DATA,paste(YEAR,BLOCK,sep="_"))
 DATA=subset(DATA,Yr.blk%in%N.base.case$Yr.blk)
@@ -449,8 +448,11 @@ fn.shw.appear=function(a)
 fn.shw.appear(a=DATA%>%filter(Fishery=='TDGDLF'))
 ggsave("Outputs/Exploratory/Species appearing in observer data_TDGDLF.tiff",width = 6,height = 10,compression = "lzw")
 
-fn.shw.appear(a=DATA%>%filter(Fishery=='NSF'))
-ggsave("Outputs/Exploratory/Species appearing in observer data_NSF.tiff",width = 6,height = 10,compression = "lzw")
+if(use.NSF)
+{
+  fn.shw.appear(a=DATA%>%filter(Fishery=='NSF'))
+  ggsave("Outputs/Exploratory/Species appearing in observer data_NSF.tiff",width = 6,height = 10,compression = "lzw")
+}
 
 
 
@@ -478,11 +480,11 @@ if(do.commercial)
                          relocate(names(Data.monthly)))
   }
   
-  #remove records from shots with less than Min.shts per year-block
+  #remove records with less than Min.shts per year-block
   d=Data.monthly[!duplicated(Data.monthly$SHEET_NO),]
   d$N=1
   d1=aggregate(N~BLOCK+YEAR,d,sum)
-  N.base.case=subset(d1,N>Min.shts)
+  N.base.case=subset(d1,N>=Min.shts)
   N.base.case$Yr.blk=with(N.base.case,paste(YEAR,BLOCK,sep="_"))
   Data.monthly$Yr.blk=with(Data.monthly,paste(YEAR,BLOCK,sep="_"))
   Data.monthly=subset(Data.monthly,Yr.blk%in%N.base.case$Yr.blk)
@@ -630,11 +632,11 @@ if(do.commercial)
                            relocate(names(Data.monthly.north)))
     }
     
-    #remove records from shots with less than Min.shts per year-block
+    #remove records with less than Min.shts per year-block
     d=Data.monthly.north[!duplicated(Data.monthly.north$SHEET_NO),]
     d$N=1
     d1=aggregate(N~BLOCK+YEAR,d,sum)
-    N.base.case=subset(d1,N>Min.shts)
+    N.base.case=subset(d1,N>=Min.shts)
     N.base.case$Yr.blk=with(N.base.case,paste(YEAR,BLOCK,sep="_"))
     Data.monthly.north$Yr.blk=with(Data.monthly.north,paste(YEAR,BLOCK,sep="_"))
     Data.monthly.north=subset(Data.monthly.north,Yr.blk%in%N.base.case$Yr.blk)
@@ -705,17 +707,7 @@ if(do.commercial)
 }
 
 
-# 4 Ecosystems indicators analyses-----------------------------------------------------------------------
-
-setwd(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs"))
-
-# Define which ecosystem indicator to consider
-Resp.vars_observer=c(subset(Ecol.Indicators,!Ecol.Indicators%in%c("FIB")),traits,Functional.diversity) 
-Resp.vars_logbook=c(Ecol.Indicators%>%subset(Ecol.Indicators%in%c("Shannon","Pielou","Simpson","MTL")),
-              traits,Functional.diversity)
-
-
-  #4.1. Put data set in right format and calculate indicators
+  #3.5. Put data set in right format 
 Data.list=list(Observer=DATA%>%filter(Fishery=='TDGDLF')%>%select(-Fishery))
 if(do.commercial) Data.list$Logbook=Data.monthly
 if(use.NSF)
@@ -724,7 +716,7 @@ if(use.NSF)
   if(do.commercial) Data.list$Logbook.north=Data.monthly.north
 }
 
-#drop data sets if not meeting minimum number of record criteria
+#drop data sets if not meeting minimum number of record criteria  
 Keep.dis=rep('no',length(Data.list))
 for(l in 1:length(Data.list))
 {
@@ -736,11 +728,94 @@ for(l in 1:length(Data.list))
 }
 Data.list=Data.list[which(Keep.dis=='yes')]
 
-#start from 1988 when all species had been assigned a species code
-for(l in 1:length(Data.list))  Data.list[[l]]=Data.list[[l]]%>%filter(YEAR>=1988)
+#starting year of analyses 
+for(l in 1:length(Data.list))  Data.list[[l]]=Data.list[[l]]%>%filter(YEAR>=Min.YEAR) 
+
+#fixing some dodgy scientific names
+for(l in 1:length(Data.list))
+  {
+    Data.list[[l]]=Data.list[[l]]%>%
+      mutate(SCIENTIFIC_NAME=case_when(SCIENTIFIC_NAME=='Pironace glauca'~'Prionace glauca',
+                                       SCIENTIFIC_NAME=='Arripis truttaceus'~'Arripis truttacea',
+                                       SCIENTIFIC_NAME=='Bothidae & Paralichthyidae'~'Bothidae & Pleuronectidae',
+                                       SCIENTIFIC_NAME=='Centroberyx sp.'~'Centroberyx spp.',
+                                       SCIENTIFIC_NAME=='Glaucosoma hebracium'~'Glaucosoma hebraicum',
+                                       SCIENTIFIC_NAME=='Seriola hipos'~'Seriola hippos',
+                                       SCIENTIFIC_NAME%in%c('Carcharhinus tilstoni','Carcharhinus limbatus')~'Carcharhinus limbatus/tilstoni',
+                                       SCIENTIFIC_NAME=='Carcharodon Carcharias'~'Carcharodon carcharias',
+                                       SCIENTIFIC_NAME=='Sphyrnidae'~'Sphyrna spp.',
+                                       SCIENTIFIC_NAME=='Squatinidae'~'Squatina spp.',
+                                       SCIENTIFIC_NAME=='Carcharhiniformes'~'Carcharhinus spp.',
+                                       TRUE~SCIENTIFIC_NAME),
+             SCIENTIFIC_NAME=str_remove(SCIENTIFIC_NAME, '\\.'))
+ }
+
+#Get list of species by group
+All.sp=vector('list',length(Data.list))
+for(l in 1:length(All.sp))
+{
+  ss=Data.list[[l]]%>%distinct(SPECIES,SCIENTIFIC_NAME)
+  if(any(grepl('.T',ss$SPECIES)))
+  {
+    ss=ss%>%
+      mutate(Group=ifelse(grepl('.T',SPECIES),'Teleost','Elasmobranch'),
+             Group=ifelse(SPECIES%in%c('BT','HT'),'Elasmobranch',Group))
+  }else
+  {
+    ss=ss%>%
+      mutate(SPECIES=as.numeric(as.character(SPECIES)),
+             Group=ifelse(SPECIES>90030,'Teleost','Elasmobranch'))
+  }
+
+  
+
+  
+  All.sp[[l]]=ss
+}
+All.sp=do.call(rbind,All.sp)%>%
+  distinct(SCIENTIFIC_NAME,Group)%>%arrange(Group,SCIENTIFIC_NAME)
 
 
-#calculate indicators
+  #3.6. Display raw species composition as proportions
+setwd(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs"))
+p.list=vector('list',length(Data.list))
+for(l in 1:length(Data.list))
+{
+  NM=names(Data.list)[l]
+  if(NM=="Logbook") NM="TDGDLF"
+  if(NM=="Logbook.north") NM="NSF"
+  #if(NM=="Observer") NM="Observer (TDGDLF)"
+  p.list[[l]]=Catch.comp(ddd=Data.list[[l]]%>%
+                           filter(!is.na(EFFORT))%>%
+                           mutate(INDIVIDUALS=INDIVIDUALS*EFFORT)%>%
+                           group_by(SCIENTIFIC_NAME,YEAR)%>%
+                           summarise(INDIVIDUALS=sum(INDIVIDUALS,na.rm=T))%>%
+                           ungroup()%>%
+                           group_by(YEAR)%>%
+                           mutate(Tot=sum(INDIVIDUALS),
+                                  Prop=INDIVIDUALS/Tot)%>%
+                           ungroup()%>%
+                           mutate(Dataset=NM),
+                         All.sp=All.sp,
+                         Display='tile')
+}
+hei.vec=c(1, 0.8)
+if(use.NSF) hei.vec=c(1, 0.8,0.6)
+ggarrange(plotlist=p.list, common.legend = TRUE,ncol=1,heights = hei.vec)
+ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/Species composition.tiff"),
+       width = 6.5,height = 10,compression = "lzw")
+
+
+
+# 4 Ecosystems indicators analyses-----------------------------------------------------------------------
+
+  #4.1. calculate indicators
+
+# Define which ecosystem indicator to consider
+Resp.vars_observer=c(subset(Ecol.Indicators,!Ecol.Indicators%in%c("FIB")),traits,Functional.diversity) 
+Resp.vars_logbook=c(Ecol.Indicators%>%subset(Ecol.Indicators%in%c("Shannon","Pielou","Simpson","MTL")),
+                    traits,Functional.diversity)
+
 Store.data.list=vector('list',length(Data.list))
 names(Store.data.list)=names(Data.list)
 for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
@@ -761,7 +836,7 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
     surveys=surveys[-1,]#deleting dummy row
     surveys=surveys[order(as.numeric(as.character(surveys$YEAR))),]#sorting by year
     
-    fn.fig(paste0("Outputs/Exploratory/Number of sheets by year_",names(Data.list)[l]),2000,2000)
+    fn.fig(paste0("Exploratory/Number of sheets by year_",names(Data.list)[l]),2000,2000)
     a=barplot(surveys$SURVEYS,ylim=c(0,700),main="No of sheet # per year",space=0.5)
     text(a[,1],surveys$SURVEYS+20,surveys$YEAR,srt=45,cex=0.75)
     dev.off()
@@ -778,7 +853,7 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
     surveys$LONG_BLOCK=as.numeric(substr(surveys$BLOCK,3,4))+100
     ocean.pal=colorRampPalette(brewer.pal(n=9,'YlOrRd'))(max(surveys$SURVEYS))#colors
     
-    fn.fig(paste0("Outputs/Exploratory/Map of number of sheets per block_",names(Data.list)[l]),2000,2000) 
+    fn.fig(paste0("Exploratory/Map of number of sheets per block_",names(Data.list)[l]),2000,2000) 
     par(las=1,mar=c(1.75,3.5,1.5,.1),oma=c(1.5,1,.1,.1),mgp=c(1,.8,0),cex.lab=1.25)
     MIN=max(-36,min(surveys$LAT_BLOCK))
     maps::map("worldHires",xlim=c(112.95, 129.5),ylim=c(MIN, max(surveys$LAT_BLOCK)),col="grey80",fill=F)
@@ -803,7 +878,7 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
       geom_point()+
       facet_wrap(~YEAR)+
       xlim(112.5,129)+ylim(MIN,max(surveys$LAT_BLOCK))
-    ggsave(paste0("Outputs/Exploratory/Map of number of sheets per block per year_",names(Data.list)[l],'.tiff'),
+    ggsave(paste0("Exploratory/Map of number of sheets per block per year_",names(Data.list)[l],'.tiff'),
            width = 8,height = 8,compression = "lzw")
     
     #Number of shots per year-block-month
@@ -812,7 +887,7 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
     a=aggregate(N~YEAR+MONTH+BLOCK+LATITUDE+LONGITUDE,a,sum)
     
     yrs=sort(unique(a$YEAR))
-    pdf(paste0('Outputs/Exploratory/Shots per year-block-month_',names(Data.list)[l],'.pdf'))
+    pdf(paste0('Exploratory/Shots per year-block-month_',names(Data.list)[l],'.pdf'))
     for(i in 1:length(yrs)) fn.see(d=subset(a,YEAR==yrs[i]))
     dev.off()
     rm(a)
@@ -821,15 +896,15 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
     if(grepl("Observer",names(Data.list)[l]))dis.var='COMMON_NAME'
     if( grepl("Logbook",names(Data.list)[l]))dis.var='SCIENTIFIC_NAME'
     TBLA=table(paste(Data.list[[l]][,dis.var],Data.list[[l]]$TROPHIC_LEVEL),Data.list[[l]]$YEAR)
-    write.csv(TBLA,paste0('Outputs/Exploratory/TBLA_species.TL_year_',names(Data.list)[l],'.csv'),row.names=T)
+    write.csv(TBLA,paste0('Exploratory/TBLA_species.TL_year_',names(Data.list)[l],'.csv'),row.names=T)
     TBLA=table(Data.list[[l]][,dis.var],Data.list[[l]]$YEAR)
-    write.csv(TBLA,paste0('Outputs/Exploratory/TBLA_species_year_',names(Data.list)[l],'.csv'),row.names=T)
+    write.csv(TBLA,paste0('Exploratory/TBLA_species_year_',names(Data.list)[l],'.csv'),row.names=T)
     TBLA=table(Data.list[[l]]$TROPHIC_LEVEL,Data.list[[l]]$YEAR)
     colfunc <- colorRampPalette(c("red", "yellow"))
     CL=rep("grey40",nrow(TBLA))
     xx=as.numeric(colnames(TBLA))
     mltplr=5
-    fn.fig(paste0('Outputs/Exploratory/TrophicLevel_by_yr_',names(Data.list)[l]),2000,2000) 
+    fn.fig(paste0('Exploratory/TrophicLevel_by_yr_',names(Data.list)[l]),2000,2000) 
     par(las=1,mar=c(1.75,3.5,1.5,.1),oma=c(1.5,1,.1,.1),mgp=c(1,.8,0),cex.lab=1.25)
     plot(xx,rep(1,length(xx)),cex=(TBLA[1,]/max(TBLA))*mltplr,ylab="",pch=19,col=CL[1],xlab="",yaxt='n',ylim=c(0,nrow(TBLA)))
     for(n in 2:nrow(TBLA)) points(xx,rep(n,length(xx)),cex=(TBLA[n,]/max(TBLA))*mltplr,pch=19,col=CL[n])
@@ -839,15 +914,8 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
     dev.off()
   }
   
-  #2. Define factors and character variables
-  Data.list[[l]]=Data.list[[l]]%>%
-                  mutate(YEAR=as.character(YEAR),
-                         MONTH=as.character(MONTH),
-                         BLOCK=as.character(BLOCK),
-                         SPECIES=as.factor(SPECIES),
-                         Yr.blk=paste(YEAR,BLOCK,sep="_"))
 
-  #3. Calculate ecological and functional indicators
+  #2. Calculate ecological and functional indicators
   idvarS=IDVAR[which(IDVAR%in%names(Data.list[[l]]))]
   if(grepl("Observer",names(Data.list)[l])) resp.vars=Resp.vars_observer
   if(grepl("Logbook",names(Data.list)[l]))  resp.vars=Resp.vars_logbook
@@ -855,21 +923,28 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
   n.rv=length(resp.vars)
   Main.title=resp.vars
   Res.var.in.log=rep("NO",length(resp.vars))  #fit response var in log space or not? 
-    
-  OUT.base.case=fn.calc.ecol.ind(DaTA=Data.list[[l]],  
+  
+  ddd=Data.list[[l]]%>%
+    mutate(YEAR=as.character(YEAR),
+           MONTH=as.character(MONTH),
+           BLOCK=as.character(BLOCK),
+           SPECIES=as.factor(SPECIES),
+           Yr.blk=paste(YEAR,BLOCK,sep="_"))
+  
+  OUT.base.case=fn.calc.ecol.ind(DaTA=ddd,  
                                  normalised="YES",
                                  Drop.yrs="NO",
                                  idvarS=idvarS,  
                                  resp.vars=resp.vars)
   if(check.discards & grepl("Observer",names(Data.list)[l]))
   {
-    OUT.base.case.retained=fn.calc.ecol.ind(DaTA=Data.list[[l]]%>%filter(FATE=='C'),
+    OUT.base.case.retained=fn.calc.ecol.ind(DaTA=ddd%>%filter(FATE=='C'),
                                             dat.nm="BC",
                                             normalised="YES",
                                             Drop.yrs="NO",
                                             idvarS=idvarS,
                                             resp.vars=subset(resp.vars,!resp.vars=="Prop.Disc"))
-    OUT.base.case.discarded=fn.calc.ecol.ind(DaTA=Data.list[[l]]%>%filter(FATE=='D'),
+    OUT.base.case.discarded=fn.calc.ecol.ind(DaTA=ddd%>%filter(FATE=='D'),
                                             dat.nm="BC",
                                             normalised="YES",
                                             Drop.yrs="NO",
@@ -881,13 +956,12 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
   if(do.exploratory=="YES")
   {
     #Look at annual averages  
-   # fn.viol.box(d=OUT.base.case,byzone=TRUE,resp.vars=resp.vars)
-   # ggsave(paste0("Outputs/Exploratory/bxplt_year.zone_",names(Data.list)[l],'.tiff'),
-   #        width = 8,height = 6,compression = "lzw")
     fn.viol.box(d=OUT.base.case,byzone=FALSE,filcol='lightsalmon2',resp.vars)
-    ggsave(paste0("Outputs/Exploratory/bxplt_year_",names(Data.list)[l],'.tiff'),
-           width = 10,height = 6,compression = "lzw")
-    
+    ggsave(paste0("Exploratory/bxplt_year_",names(Data.list)[l],'.tiff'),
+           width = 10,height = 8,compression = "lzw")
+    # fn.viol.box(d=OUT.base.case,byzone=TRUE,resp.vars=resp.vars)
+    # ggsave(paste0("Outputs/Exploratory/bxplt_year.zone_",names(Data.list)[l],'.tiff'),
+    #        width = 8,height = 6,compression = "lzw")
     if(check.discards & grepl("Observer",names(Data.list)[l]))
     {
       fn.viol.box(d=OUT.base.case.retained,byzone=FALSE,filcol='lightsalmon2',resp.vars=subset(resp.vars,!resp.vars=="Prop.Disc"))
@@ -899,7 +973,7 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
     }
     
      #Response var error structure
-    fn.fig(paste0("Outputs/Exploratory/error_structure_Obs",names(Data.list)[l]),2000,2000) 
+    fn.fig(paste0("Exploratory/error_structure_Obs",names(Data.list)[l]),2000,2000) 
     par(mfrow=c(n.rv,2),las=1,mar=c(1,1.5,1,1.2),oma=c(1,1,.1,1),mgp=c(1,.5,0))
     for(i in 1:n.rv)
     {
@@ -909,7 +983,7 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
     dev.off()
     
     #Check if correlation between effort and indices
-    fn.fig(paste0("Outputs/Exploratory/Correlation_effort_indices_",names(Data.list)[l]),2000,2000) 
+    fn.fig(paste0("Exploratory/Correlation_effort_indices_",names(Data.list)[l]),2000,2000) 
     smart.par(n.plots=length(resp.vars),MAR=c(1.75,3.5,1.5,.1),OMA=c(3,1,.3,2),MGP=c(1,.8,0))
     for(i in 1:n.rv)
     {
@@ -928,12 +1002,71 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
   rm(OUT.base.case)
 }
 
+  # Display raw species composition as proportions 
+p.list=vector('list',length(Store.data.list))
+for(l in 1:length(Store.data.list))
+{
+  if(grepl("Observer",names(Store.data.list)[l])) Resp.vars=Resp.vars_observer
+  if(grepl("Logbook",names(Store.data.list)[l]))  Resp.vars=Resp.vars_logbook
+  
+  NM=names(Store.data.list)[l]
+  if(NM=="Logbook") NM="TDGDLF"
+  if(NM=="Logbook.north") NM="NSF"
+  #if(NM=="Observer") NM="Observer (TDGDLF)" max(ddd%>%filter(Indicator=='K')%>%pull(Prop))
+  
+  XLAB=''
+  if(l==length(Store.data.list)) XLAB='Financial year'
+  
+  ddd=Store.data.list[[l]]%>%
+    filter(!is.na(EFFORT))%>%
+    dplyr::select(YEAR,all_of(Resp.vars))%>%
+    gather(Indicator,Prop,-YEAR)%>%
+    group_by(Indicator,YEAR)%>%
+    summarise(Prop=mean(Prop,na.rm=T))%>%
+    ungroup()%>%
+    group_by(Indicator)%>%
+    mutate(Prop.mean=mean(Prop,na.rm=T))%>%
+    ungroup()%>%
+    mutate(Rel.value=Prop/Prop.mean,
+           Indicator=case_when(Indicator=="FnRich_morph"~"Functional richness (morph.)",
+                               Indicator=="FnRich_ecol"~"Functional richness (ecol.)",
+                               Indicator=="MTL"~"Mean trophic level",
+                               Indicator=="MML"~"Mean maximum length",
+                               Indicator=="MeanML"~"Mean length",
+                               Indicator=="Prop.Disc"~"Proportion of discards",
+                               Indicator=="MaxAge"~"Maximum age",
+                               Indicator=="Age.mat.prop"~"Proportion mature",
+                               Indicator=="K"~"Growth coefficient",
+                               Indicator=="MaxLen"~"Maximum length",
+                               TRUE~Indicator))
+  
+  p.list[[l]]=ddd%>%
+    ggplot(aes(YEAR, Indicator , fill= Rel.value)) + 
+    geom_tile()+
+    scale_fill_gradient2(low="lightgoldenrodyellow",mid="darkgoldenrod2", high="brown4",
+                         midpoint = mean(range(ddd$Rel.value)),name = "Relative value")+
+    ylab('')+xlab(XLAB)+
+    theme_PA(axs.t.siz=10,Ttl.siz=13)+
+    theme(legend.position = 'top',
+          plot.title.position = "plot",
+          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+    ggtitle(NM)
+}
+hei.vec=c(1, 1)
+if(use.NSF) hei.vec=c(1, 1,0.6)
+ggarrange(plotlist=p.list, common.legend = TRUE,ncol=1,heights = hei.vec)
+ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/Indicators by year.tiff"),
+       width = 6.5,height = 8,compression = "lzw")
+
+
+
+
 
   #4.2. Stats     
 setwd(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate"))
 Store.out=vector('list',length(Data.list))
 names(Store.out)=names(Data.list)
-tic()
+tic()    #takes 6 mins
 for(l in 1:length(Store.out)) 
 {
   print(paste("Ecosystems indicators stats for -----------",names(Data.list)[l]))
@@ -967,26 +1100,69 @@ for(l in 1:length(Store.out))
 }
 toc()
 
-#4.3. Display stats results  
-#by data set
+#4.3. Display Year prediction  
+  #by data set
 for(l in 1:length(Store.out)) 
 {
   Store.out[[l]]%>%
-    ggplot(aes(yr,MeAn))+
+    filter(Variable=='YEAR')%>%
+    mutate(Value=as.numeric(Value))%>%
+    ggplot(aes(Value,MeAn))+
     geom_point()+
     geom_errorbar(aes(ymin = LowCI, ymax = UppCI))+
     facet_wrap(~Indicator,scales='free_y')+
     scale_y_continuous(limits = c(0, NA))+
-    theme_PA(strx.siz=9)+ylab('Relative value')+xlab('Year')
-  ggsave(paste0("Year prediction_",names(Store.out)[l],".tiff"),width = 6.5,height = 6,compression = "lzw")
+    theme_PA(strx.siz=8.5)+ylab('Relative value')+xlab('Year')+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  ggsave(paste0("Year prediction_",names(Store.out)[l],".tiff"),width = 8,height = 6,compression = "lzw")
 }
 
-
-#data sets combined  
+  #data sets combined  
 do.call(rbind,Store.out)%>%
-  mutate(yr=case_when(Data.set=='Logbook'~yr+0.25,
-                      Data.set=='Logbook.north'~yr-0.25,
-                      TRUE~yr),
+  filter(Variable=='YEAR')%>%
+  mutate(Value=as.numeric(Value))%>%
+  mutate(yr=case_when(Data.set=='Logbook'~Value+0.25,
+                      Data.set=='Logbook.north'~Value-0.25,
+                      TRUE~Value),
+         Data.set=case_when(Data.set=='Logbook'~"TDGDLF",
+                            Data.set=='Logbook.north'~'NSF',
+                            TRUE~Data.set))%>%
+  ggplot(aes(yr,MeAn,color=Data.set))+
+  geom_point(alpha=0.8,size=1.1)+
+  geom_errorbar(aes(ymin = LowCI, ymax = UppCI))+
+  #geom_line(alpha=.6,linetype='dotted')+
+  facet_wrap(~Indicator,scales='free_y',ncol=2)+
+  scale_y_continuous(limits = c(0, NA))+
+  theme_PA(strx.siz=10)+ylab('Relative value')+xlab('Financial year')+
+  theme(legend.position = 'top',
+        legend.title=element_blank())
+ggsave(paste0("Year prediction_Combined.tiff"),width = 5,height = 8,compression = "lzw")
+
+
+#4.4. Display Month prediction  
+  #by data set
+for(l in 1:length(Store.out)) 
+{
+  Store.out[[l]]%>%
+    filter(Variable=='MONTH')%>%
+    mutate(Value=as.numeric(Value))%>%
+    ggplot(aes(Value,MeAn))+
+    geom_point()+
+    geom_errorbar(aes(ymin = LowCI, ymax = UppCI))+
+    facet_wrap(~Indicator,scales='free_y')+
+    scale_y_continuous(limits = c(0, NA))+
+    theme_PA(strx.siz=8.5)+ylab('Relative value')+xlab('Month')+
+    scale_x_continuous(breaks=seq(1,12,1))
+  ggsave(paste0("Month prediction_",names(Store.out)[l],".tiff"),width = 8,height = 6,compression = "lzw")
+}
+
+  #data sets combined  
+do.call(rbind,Store.out)%>%
+  filter(Variable=='MONTH')%>%
+  mutate(Value=as.numeric(Value))%>%
+  mutate(yr=case_when(Data.set=='Logbook'~Value+0.25,
+                      Data.set=='Logbook.north'~Value-0.25,
+                      TRUE~Value),
          Data.set=case_when(Data.set=='Logbook'~"TDGDLF",
                             Data.set=='Logbook.north'~'NSF',
                             TRUE~Data.set))%>%
@@ -996,394 +1172,348 @@ do.call(rbind,Store.out)%>%
   #geom_line()+
   facet_wrap(~Indicator,scales='free_y',ncol=2)+
   scale_y_continuous(limits = c(0, NA))+
-  theme_PA(strx.siz=9)+ylab('Relative value')+xlab('Year')+
+  theme_PA(strx.siz=10)+ylab('Relative value')+xlab('Month')+
   theme(legend.position = 'top',
-        legend.title=element_blank())
-ggsave(paste0("Year prediction_Combined.tiff"),width = 5,height = 8,compression = "lzw")
+        legend.title=element_blank())+
+  scale_x_continuous(breaks=seq(1,12,1))
+ggsave(paste0("Month prediction_Combined.tiff"),width = 5,height = 8,compression = "lzw")
 
-#ACA
+
+#4.5. Display Lat and Long prediction  
+  #by data set
+for(l in 1:length(Store.out)) 
+{
+  Store.out[[l]]%>%
+    filter(Variable=='LATITUDE LONGITUDE')%>%
+    mutate(Lat=as.numeric(gsub( " .*$", "", Value)),
+           Long=as.numeric(gsub("^\\S+ ", "", Value)))%>%
+    ggplot(aes(Long,Lat,size=MeAn,color=MeAn))+
+    geom_point(alpha=0.6)+
+    facet_wrap(~Indicator,scales='free_y')+
+    theme_PA(strx.siz=8.5)+ylab('Latitude')+xlab('Longitude')+
+    theme(legend.title = element_blank(),
+          legend.position = 'top')
+  ggsave(paste0("Lat long prediction_",names(Store.out)[l],".tiff"),width = 8,height = 6,compression = "lzw")
+}
+
 # 5 Multivariate analyses-------------------------------------------------------------------------
-
-
-
-
-
-#keep records from shots according to criteria  
-# d=DATA[!duplicated(DATA$SHEET_NO),]
-# d$N=1
-# d1=aggregate(N~BLOCK+YEAR,d,sum)
-# d1=subset(d1,!BLOCK=="0")
-# N.base.case=subset(d1,N>Min.shts)
-# N.sens.1=subset(d1,N>Min.shts.sens[1])
-
-
-# N.base.case$Yr.blk=with(N.base.case,paste(YEAR,BLOCK,sep="_"))
-# N.sens.1$Yr.blk=with(N.sens.1,paste(YEAR,BLOCK,sep="_"))
-
-
-# DATA$Yr.blk=with(DATA,paste(YEAR,BLOCK,sep="_"))
-
-
-
-
-# DATA.base.case=subset(DATA,Yr.blk%in%unique(N.base.case$Yr.blk))
-# DATA.sens.1=subset(DATA,Yr.blk%in%unique(N.sens.1$Yr.blk))
-
-
-
-
-
-  # 4.2 WA Fisheries commercial data
-if(do.commercial)
+if(do.multivariate)
 {
- 
-  
-  
-  #calculate indices for each shot
-  d.anlsys=subset(Data.monthly,YEAR>=Start.yr)
-  SHOTS=unique(d.anlsys$SHEET_NO)
-  Store.shots=vector('list',length(SHOTS))
-  names(Store.shots)=SHOTS
-  system.time(for(i in 1:length(SHOTS))       #takes 102 seconds
+  Store.out.multi=vector('list',length(Data.list))
+  names(Store.out.multi)=names(Data.list)
+  TERMS=c('YEAR','MONTH','LATITUDE','LONGITUDE')
+  #TERM.form='year+s(month, k = 12, bs = "cc")+s(latitude, longitude)+ s(BOAT, bs = "re")'
+  TERM.form='year+month+latitude*longitude'
+  tic()
+  for(l in 1:length(Store.out.multi))   
   {
-    dat=subset(d.anlsys,SHEET_NO==SHOTS[i])
-    dat.indx=dat[!duplicated(dat$SHEET_NO),]
-    dat.indx=subset(dat.indx,select=c(SHEET_NO,YEAR,MONTH,ZONE,BLOCK,BOAT,
-                                      EFFORT,BIOREGION))
-    #d=table(dat$SPECIES)                     #use number of species
-    d=tapply(dat$LIVEWT.c, dat$SPECIES, sum)  #use catch weight     
-    d[is.na(d)]=0
+    print(paste("Multivariate stats for -----------",names(Data.list)[l]))
     
-    #Diversity indicators
-    Div.InDX=data.frame(
-      Shannon = diversity(d, index = "shannon"),
-      Simpson = diversity(d, index = "simpson")
-    )
-    dat.indx=cbind(dat.indx,Div.InDX)
+    Store.out.multi[[l]]=multivariate.fn(d=Data.list[[l]]%>%
+                                           mutate(YEAR=as.factor(YEAR),
+                                                  MONTH=as.integer(MONTH),
+                                                  BLOCK=as.character(BLOCK),
+                                                  SPECIES=as.character(SPECIES)),
+                                         Terms=tolower(TERMS),
+                                         Def.sp.term=c('species','year'),
+                                         Transf='proportion',
+                                         Show.term='year',
+                                         Group='95',
+                                         hndl=handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate"),
+                                         All.species.names=Data.list[[l]]%>%distinct(SPECIES,SCIENTIFIC_NAME),
+                                         dat.name=names(Data.list)[l],
+                                         term.form=TERM.form)
     
-    #Ecosystem indicators 
-    dd=d
-    dd=subset(dd,dd>0)
-    t_level=aggregate(TROPHIC_LEVEL ~ SPECIES, FUN=mean, data=dat)
-    fl_max=NULL
-    Eco.InDX=Eco.ind.shot(data=dd,TROPHIC.LEVEL=t_level,MAX.BODY.LENGTH=NULL,TROPHIC.EFFICIENCY = 0.1)
-    Eco.InDX=as.data.frame(do.call(cbind,Eco.InDX))
-    dat.indx=cbind(dat.indx,Eco.InDX)
-    Store.shots[[i]]=dat.indx
-  })
-  
-  DATA.shots.diversity.commercial=do.call(rbind,Store.shots)
-  
-  
-  DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,!is.na(Shannon))
-  #DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,!is.na(Margalef))
-  #DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,!is.na(Pielou))
-  DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,!is.na(Simpson))
-  DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,!is.na(MTL))
-  
-  DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,Shannon>0)
-  #DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,Margalef>0)
-  #DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,Pielou>0)
-  DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,Simpson>0)
-  DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,MTL>0)
-  
-  
-  # Q999=quantile(DATA.shots.diversity.commercial$Shannon,probs=0.9999)
-  # DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,Shannon<=Q999)
-  # 
-  # Q999=quantile(DATA.shots.diversity.commercial$Margalef,probs=0.9999)
-  # DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,Margalef<=Q999)
-  # 
-  # Q999=quantile(DATA.shots.diversity.commercial$Pielou,probs=0.9999)
-  # DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,Pielou<=Q999)
-  # 
-  # Q999=quantile(DATA.shots.diversity.commercial$Simpson,probs=0.9999)
-  # DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,Simpson<=Q999)
-  # 
-  # Q999=quantile(DATA.shots.diversity.commercial$MTL,probs=0.9999)
-  # DATA.shots.diversity.commercial=subset(DATA.shots.diversity.commercial,MTL<=Q999)
-  
-  
-  
-  # 4.2.3 Modelling
-  #note: Margalef removed because not compatible with weight data
-  resp.vars=c("Shannon","Simpson","MTL")
-  n.rv=length(resp.vars)
-  Predictors=c("YEAR","BOAT","BLOCK","MONTH")
-  Expl.varS=Predictors
-  FactoRS=Expl.varS
-  
-  Store.mod.out.commercial=vector('list',length(resp.vars))
-  names(Store.mod.out.commercial)=resp.vars
-  
-  Res.var.in.log=rep("NO",length(resp.vars))
-  Yrs_commercial=sort(unique(DATA.shots.diversity.commercial$YEAR))
-  Separate.monthly_daily="NO"
-  if(Separate.monthly_daily=="YES")
-  {
-    Yrs_monthly=Yrs_commercial[1]:2005
-    Yrs_daily=2006:Yrs_commercial[length(Yrs_commercial)]
-    Store.mod.out.commercial.daily=Store.mod.out.commercial
   }
+  toc()
   
+  
+  #Display year effect
+  ddd=rbind(Store.out.multi$Observer$Preds%>%mutate(Dataset='Observer'),
+            Store.out.multi$Logbook$Preds%>%mutate(Dataset='Logbook'),
+            Store.out.multi$Logbook.north$Preds%>%mutate(Dataset='Logbook.north'))%>%
+    mutate(year=as.numeric(as.character(year)))
+  # p1=Store.out.multi$Observer$Preds%>%
+  #      ggplot(aes(year,Median))+
+  #      geom_bar(stat="identity")+
+  #      facet_wrap(~scientific_name,scales='free_y')+
+  #      geom_errorbar(aes(ymin = lower95, ymax = upper95), width = 0.2)+
+  #      scale_y_continuous(limits=c(0, NA))
+  
+  # p2=ddd%>%
+  #   group_by(year)%>%
+  #   mutate(Median.rel=Median/max(Median))%>%
+  #   ggplot(aes(year,Median.rel,fill=scientific_name))+
+  #   geom_bar(stat='identity',position="stack")+
+  #   facet_wrap(~Dataset,ncol=1)+
+  #   theme_PA()+
+  #   theme(legend.position = 'top')
+  
+  ddd%>%
+    group_by(year)%>%
+    mutate(Median.rel=Median/mean(Median))%>%
+    mutate(CPUE=Median)%>%
+    #mutate(CPUE=Median.rel)%>%
+    ggplot(aes(year, scientific_name , fill= CPUE)) + 
+    geom_tile()+
+    scale_fill_gradient2(low="grey85",mid='grey60', high="black")+ylab('')+xlab('Financial year')+
+    facet_wrap(~Dataset,ncol=1,scales='free_y')+
+    theme_PA()+
+    theme(legend.position = 'top')
+  ggsave(handl_OneDrive(paste0("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate/","Year prediction_All.tiff")),
+         width = 6.5,height = 8,compression = "lzw")
+  
+  
+  Store.out.multi$Logbook$Preds%>%mutate(Dataset='Logbook')%>%
+    group_by(year)%>%
+    mutate(Median.rel=Median/mean(Median))%>%
+    mutate(CPUE=Median)%>%
+    #mutate(CPUE=Median.rel)%>%
+    ggplot(aes(year, scientific_name , fill= CPUE)) + 
+    geom_tile()+
+    scale_fill_gradient2(low="grey85",mid='grey60', high="black")+ylab('')+xlab('Financial year')+
+    theme_PA()+
+    theme(legend.position = 'top',
+          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  ggsave(handl_OneDrive(paste0("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate/","Year prediction_Logbook.tiff")),
+         width = 8,height = 6,compression = "lzw")
+  
+  #ANOVAs
+  tic()
+  ANOVA=anova(Store.out.multi$Logbook$mod)
+  toc()
 }
 
 
-
-
-# 5 glm approach-------------------------------------------------------------------------
-#takes 11 seconds
-if(do.commercial)
+# 6. Display.catch.effort -----------------------------------------------------------------------
+if(display.catch.effort)
 {
-  if(Separate.monthly_daily=="NO")
+  Dat.repository=handl_OneDrive('Analyses/Data_outs/')  #locations where all data are stored
+  fn.in=function(NM) fread(paste(Dat.repository,NM,sep=""),data.table=FALSE)
+  #TDGDLF
+  Effort.monthly=fn.in(NM='Annual.total.eff.days.csv')          #all years
+  Effort.monthly.zone=fn.in(NM='Annual.zone.eff.days.csv') 
+  
+  #NSF
+  Effort.monthly.north=fn.in(NM='Annual.total.eff_NSF.csv') 
+  
+  Southern=fn.in(NM='Data.monthly.csv')%>%
+    filter(!Shark.fishery=='non.shark.fishery' & SPECIES<99999)%>%
+    filter(!is.na(BLOCKX))%>%
+    group_by(FINYEAR,FisheryZone,BLOCKX,SPECIES)%>%
+    summarise(LIVEWT.c=sum(LIVEWT.c,na.rm=T))
+  Northern=fn.in(NM='Data.monthly.north.csv')%>%
+    filter(!Shark.fishery=='non.shark.fishery' & SPECIES<99999)%>%
+    filter(!is.na(BLOCKX))%>%
+    group_by(FINYEAR,FisheryZone,BLOCKX,SPECIES)%>%
+    summarise(LIVEWT.c=sum(LIVEWT.c,na.rm=T))
+  if(use.NSF)
   {
-    system.time(for(i in 1:n.rv)
-    {
-      #split data into montlhy and daily       
-      DDD=DATA.shots.diversity.commercial
-      
-      DDD$YEAR=as.factor(DDD$YEAR)
-      DDD$BLOCK=as.factor(DDD$BLOCK)
-      DDD$MONTH=as.factor(DDD$MONTH)
-      DDD$BOAT=as.factor(DDD$BOAT)
-      DDD$ZONE=as.factor(DDD$ZONE)
-      
-      Store.mod.out.commercial[[i]]=Mod.fn.glm(d=DDD,
-                                               ResVar=resp.vars[i],Expl.vars=Expl.varS,
-                                               Predictrs=Predictors,
-                                               FactoRs=FactoRS,OFFSET=OFFSETT,
-                                               log.var=Res.var.in.log[i],add.inter="NO",
-                                               MixedEff=MixedEff)
-      
-    })
+    Spatio.temp.dat=rbind(Southern%>%
+                            mutate(Fishery='Southern'),
+                          Northern%>%
+                            mutate(Fishery='Northern'))
+  }else
+  {
+    Spatio.temp.dat=Southern%>%mutate(Fishery='Southern')
   }
-  if(Separate.monthly_daily=="YES")
+  
+  
+  
+  #spatial effort
+  Relevant.yrs=use.dis.yrs=unique(Spatio.temp.dat$FINYEAR)
+  Effort.monthly_blocks=fn.in("Effort.monthly.csv")
+  Effort.daily_blocks=fn.in("Effort.daily.csv")
+  Effort.monthly.north_blocks=fn.in("Effort.monthly.north.csv")
+  Effort.daily.north_blocks=fn.in("Effort.daily.north.csv") 
+  
+  Effort.monthly_blocks=Effort.monthly_blocks%>%filter(FINYEAR%in%use.dis.yrs) 
+  Effort.monthly.north_blocks=Effort.monthly.north_blocks%>%filter(FINYEAR%in%use.dis.yrs) 
+  Effort.daily_blocks=Effort.daily_blocks%>%filter(finyear%in%use.dis.yrs) 
+  Effort.daily.north_blocks=Effort.daily.north_blocks%>%filter(finyear%in%use.dis.yrs) 
+  
+  FINYrS=sort(unique(c(as.character(unique(Effort.monthly_blocks$FINYEAR))),sort(as.character(unique(Effort.daily_blocks$finyear)))))
+  grouping=8
+  FINYrS.gp=seq(1,length(FINYrS),by=grouping)
+  FINYrS.gped=vector('list',length(FINYrS.gp))
+  for(f in 1:length(FINYrS.gped))
   {
-    system.time(for(i in 1:n.rv)
+    if(f==length(FINYrS.gped))
     {
-      #split data into montlhy and daily       
-      DDD_comm=subset(DATA.shots.diversity.commercial,YEAR%in%Yrs_monthly)
+      FINYrS.gped[[f]]=FINYrS[FINYrS.gp[f]:length(FINYrS)]
+      if(length(FINYrS.gped[[f]])==1)
+      {
+        names(FINYrS.gped)[f]=FINYrS.gped[[f]][1]
+      }else
+      {
+        names(FINYrS.gped)[f]=paste(FINYrS.gped[[f]][1],"to",FINYrS.gped[[f]][length(FINYrS.gped[[f]])])
+      }
       
-      DDD_comm$YEAR=as.factor(DDD_comm$YEAR)
-      DDD_comm$MONTH=as.factor(DDD_comm$MONTH)
-      DDD_comm$BOAT=as.factor(DDD_comm$BOAT)
-      DDD_comm$ZONE=as.factor(DDD_comm$ZONE)
-      
-      Store.mod.out.commercial[[i]]=Mod.fn.glm(d=DDD_comm,
-                                               ResVar=resp.vars[i],Expl.vars=Expl.varS,
-                                               Predictrs=Predictors,
-                                               FactoRs=FactoRS,OFFSET="offset(log.EFFORT)",
-                                               log.var=Res.var.in.log[i],add.inter="NO")
-      
-      
-      DDD_daily=subset(DATA.shots.diversity.commercial,YEAR%in%Yrs_daily)
-      
-      DDD_daily$YEAR=as.factor(DDD_daily$YEAR)
-      DDD_daily$MONTH=as.factor(DDD_daily$MONTH)
-      DDD_daily$BOAT=as.factor(DDD_daily$BOAT)
-      DDD_daily$ZONE=as.factor(DDD_daily$ZONE)
-      
-      Store.mod.out.commercial.daily[[i]]=Mod.fn.glm(d=DDD_daily,
-                                                     ResVar=resp.vars[i],Expl.vars=Expl.varS,
-                                                     Predictrs=Predictors,
-                                                     FactoRs=FactoRS,OFFSET="offset(log.EFFORT)",
-                                                     log.var=Res.var.in.log[i],add.inter="NO")
-      
-      
-    }) 
-  }
-}
-
-
-# 6 data mining-------------------------------------------------------------------------
-if(do.commercial)
-{
-  # system.time(for(i in 1:n.rv)Store.mod.out.commercial[[i]]=Mod.fn.mining(d=DATA.shots.diversity.commercial,
-  #             ResVar=resp.vars[i],Predictrs=Predictors,Y.type="Continuous",Prop.train=.7,ALL.models="NO",nboot=1))
-  
-  #Get anova table
-  TABL.monthly=fn.anova.com(MODEL=Store.mod.out.commercial)
-  if(Separate.monthly_daily=="YES")TABL.daily=fn.anova.com(MODEL=Store.mod.out.commercial.daily)
-  
-  
-  #export anova tables as word doc
-  Export.tbl(WD=getwd(),Tbl=TABL.monthly,Doc.nm="Anova.table.commercial",caption=NA,paragph=NA,
-             HdR.col='black',HdR.bg='white',Hdr.fnt.sze=10,Hdr.bld='normal',body.fnt.sze=10,
-             Zebra='NO',Zebra.col='grey60',Grid.col='black',
-             Fnt.hdr= "Times New Roman",Fnt.body= "Times New Roman",
-             HDR.names=c('TERM', resp.vars),
-             HDR.span=c(1,rep(2,length(resp.vars))),
-             HDR.2nd=c("",rep(c("P","% dev. expl."),length(resp.vars))))
-  
-  if(Separate.monthly_daily=="YES")Export.tbl(WD=getwd(),Tbl=TABL.daily,Doc.nm="Anova.table.commercial_daily",caption=NA,paragph=NA,
-                                              HdR.col='black',HdR.bg='white',Hdr.fnt.sze=10,Hdr.bld='normal',body.fnt.sze=10,
-                                              Zebra='NO',Zebra.col='grey60',Grid.col='black',
-                                              Fnt.hdr= "Times New Roman",Fnt.body= "Times New Roman",
-                                              HDR.names=c('TERM', resp.vars),
-                                              HDR.span=c(1,rep(2,length(resp.vars))),
-                                              HDR.2nd=c("",rep(c("P","% dev. expl."),length(resp.vars))))
-  
-  
-  #Plot diversity and ecosystem indices by zone
-  zoN=sort(unique(DATA.shots.diversity.commercial$ZONE))
-  YrSs=sort(unique(DATA.shots.diversity.commercial$YEAR))
-  
-  # normalisation done on each data set separately   
-  fn.fig("Div & Eco indices.commercial_normalised",1200,2400)  #takes 5 sec per iteration
-  smart.par(n.plots=length(resp.vars),MAR=c(1.75,3.5,1.5,.1),OMA=c(3,1,.1,2),MGP=c(1,.8,0))
-  Main.title=resp.vars 
-  
-  #loop over each index   
-  system.time(for(i in 1:length(Store.mod.out.commercial))    #takes 1 sec per niter
-  {
-    
-    if(Separate.monthly_daily=="NO")
+    }else
     {
-      MN=fun.plt.yr.pred.com(d=Store.mod.out.commercial[[i]],
-                             normalised="YES",PredictorS=Predictors,log.var=Res.var.in.log[i],
-                             ALL.YRS=YrSs)
-      
-      plot.comm(dat.plt=MN,MAIN=Main.title[i],Cx=1.125,YLIM=NULL,Cx.axs=1.35)
-      
-      axis(1,seq(Yrs_commercial[1],Yrs_commercial[length(Yrs_commercial)],5)
-           ,seq(Yrs_commercial[1],Yrs_commercial[length(Yrs_commercial)],5),tck=-0.05,cex.axis=1.15)
+      FINYrS.gped[[f]]=FINYrS[FINYrS.gp[f]:(FINYrS.gp[f+1]-1)]
+      names(FINYrS.gped)[f]=paste(FINYrS.gped[[f]][1],"to",FINYrS.gped[[f]][length(FINYrS.gped[[f]])])
     }
-    if(Separate.monthly_daily=="YES")
-    {
-      MN=fun.plt.yr.pred.com(d=Store.mod.out.commercial[[i]],
-                             normalised="YES",PredictorS=Predictors,log.var=Res.var.in.log[i],
-                             ALL.YRS=Yrs_monthly)
-      DAY=fun.plt.yr.pred.com(d=Store.mod.out.commercial.daily[[i]],
-                              normalised="YES",PredictorS=Predictors,log.var=Res.var.in.log[i],
-                              ALL.YRS=Yrs_monthly)
-      plot.comm(dat.plt=rbind(MN,DAY),MAIN=Main.title[i],
-                Cx=1.125,YLIM=NULL,Cx.axs=1.35)
-      
-      #highlight daily records
-      polygon(x=c(2006,YrSs[length(YrSs)]+1,YrSs[length(YrSs)]+1,2006),
-              y=c(-10,-10,10,10),col=rgb(.1,.1,.1,alpha=0.25),border=rgb(.1,.1,.1,alpha=0.25))
-      
-      if(i%in%c(3,4))axis(1,seq(Yrs_commercial[1],Yrs_commercial[length(Yrs_commercial)],5)
-                          ,seq(Yrs_commercial[1],Yrs_commercial[length(Yrs_commercial)],5),tck=-0.05,cex.axis=1.15)
-      
-    }
-  })
-  mtext("Year",1,outer=T,cex=1.5,line=1.5)
-  mtext("Relative value",2,-.6,outer=T,cex=1.5,las=3)
-  dev.off()
-  
-}
-
-
-
-# 7 Multivariate analysis-----------------------------------------------------------------------
-#note: Consider the Multivariate stats used for Parks Australia 2019!!!
-
-source(handl_OneDrive("Analyses/SOURCE_SCRIPTS/Git_other/Multivariate_statistics.R"))
-
-  #7.1  Observer data
-DataSets=c("proportion")   #response variables
-Predictors=c("YEAR","BLOCK","BOAT","MONTH","BOTDEPTH")
-IDVAR=Predictors
-Prop.sp=table(DATA.base.case$SPECIES)
-Prop.sp=Prop.sp/sum(Prop.sp)
-Grp.sp=names(100*Prop.sp[100*Prop.sp<0.1]) #group species occurring less than 0.1%, otherwise multivars fail
-Numbers.block.year.mn.vesl=DATA.base.case
-Numbers.block.year.mn.vesl$SPECIES=as.character(Numbers.block.year.mn.vesl$SPECIES)
-Numbers.block.year.mn.vesl$SPECIES=with(Numbers.block.year.mn.vesl,
-  ifelse(SPECIES%in%Grp.sp,"Other",SPECIES))   
-Numbers.block.year.mn.vesl$SPECIES=factor(Numbers.block.year.mn.vesl$SPECIES)
-
-Numbers.block.year.mn.vesl=aggregate(formula(paste(ResVar,paste(c(MultiVar,Predictors),collapse="+"),sep="~")),
-                                     Numbers.block.year.mn.vesl,sum)
-Numbers.block.year.mn.vesl$YEAR=factor(Numbers.block.year.mn.vesl$YEAR)
-Numbers.block.year.mn.vesl$BLOCK=factor(Numbers.block.year.mn.vesl$BLOCK)
-Numbers.block.year.mn.vesl$BOAT=factor(Numbers.block.year.mn.vesl$BOAT)
-Numbers.block.year.mn.vesl$MONTH=factor(Numbers.block.year.mn.vesl$MONTH)
-
-STore.multi.var.observer=Multivar.fn(DATA=Numbers.block.year.mn.vesl,ResVar=ResVar,MultiVar=MultiVar,
-                                   Predictors=Predictors,IDVAR=IDVAR,
-                                   Formula=formula("d.res.var~."),DataSets=DataSets)
-
-Hndl=handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate")
-for(s in 1:length(STore.multi.var.observer)) 
-{
-  with(STore.multi.var.observer[[s]],
-       {
-         fn.display.multivar(d=d,IDVAR=IDVAR,Predictors=Predictors,MDS=MDS,
-                             Permanova.table=Permanova.table,
-                             permanova.pairwise=permanova.pairwise,
-                             Simper=Simper,NM=names(STore.multi.var.observer)[s],
-                             hndl=paste(Hndl,"Observer/",sep="/"),cexMDS=.75)
-       })
-}
-
-  #7.2 Commercial
-if(do.commercial)
-{
-  fn.min.obs.ef=function(d,subset.sp)
-  {
-    N.samples=length(unique(d$SHEET_NO))
-    d=d%>%mutate(ktch=1,
-                 Eff.breaks=cut(EFFORT,breaks=50))
-    Sp.occ=d%>%group_by(SPECIES)%>%
-      summarise(Tot=sum(ktch))%>%
-      mutate(Occ=100*Tot/N.samples)%>%
-      filter(Occ>subset.sp)%>%pull(SPECIES)
-    
-    b1=d%>%filter(SPECIES%in%Sp.occ)%>%
-      group_by(SHEET_NO,Eff.breaks)%>%
-      summarise(N.species=sum(ktch))
-    
-    boxplot(N.species~Eff.breaks,b1)
-    
-    #ACA: Need to extract the min effort when it asymtotes.. can I automate this??
-    # min.effort=
-    
-    return(min.effort)
-    
   }
-  Min.occ=0  #in 100%, if set to 0, then all species used
+  suppressWarnings({FINYrS.gped=do.call(cbind,FINYrS.gped)%>%
+    data.frame%>%
+    gather('Rango','FINYEAR')%>%
+    mutate(Rango=substr(Rango,2,50),
+           Rango=sub(".to.", " to ", Rango),
+           Rango=str_replace_all(Rango, c("\\."), "-"))%>%
+    distinct(Rango,FINYEAR)})
+  daily.years=unique(Effort.daily_blocks$finyear)
+  daily.years=subset(daily.years,!daily.years=="2005-06")
   
-  #7.2.1 Monthly                                    AM I USING MONTHLY????????????
+  Spatial.effort_monthly=Effort.monthly_blocks%>%
+    filter(!Shark.fishery=='non.shark.fishery' &
+             FINYEAR%in%Relevant.yrs&
+             !FINYEAR%in%daily.years)%>%
+    mutate(Effort=Km.Gillnet.Days.c,
+           LAT1=-floor(abs(LAT)),
+           LONG1=floor(LONG))%>%
+    filter(!is.na(Effort) | !is.na(LAT))%>%
+    filter(METHOD=='GN')%>%
+    group_by(Same.return,zone,LAT1,LONG1,FINYEAR)%>%
+    summarise(Effort=max(Effort))%>%
+    ungroup()%>%
+    group_by(LAT1,LONG1,zone,FINYEAR)%>%
+    summarise(Effort=sum(Effort))
+  Spatial.effort_daily=Effort.daily_blocks%>%
+    filter(!Shark.fishery=='non.shark.fishery' &
+             finyear%in%Relevant.yrs )%>%
+    mutate(Effort=Km.Gillnet.Days.c,
+           LAT1=-floor(abs(LAT)),
+           LONG1=floor(LONG))%>%
+    filter(!is.na(Effort) | !is.na(LAT))%>%
+    filter(method=='GN')%>%
+    group_by(Same.return.SNo,zone,LAT1,LONG1,finyear)%>%
+    summarise(Effort=max(Effort))%>%
+    ungroup()%>%
+    rename(FINYEAR=finyear)%>%
+    group_by(LAT1,LONG1,zone,FINYEAR)%>%
+    summarise(Effort=sum(Effort))
   
+  Spatial.effort_monthly.north=Effort.monthly.north_blocks%>%
+    filter(FINYEAR%in%Relevant.yrs &
+             !FINYEAR%in%unique(Effort.daily.north_blocks$finyear))%>%
+    mutate(Effort=hook.days,
+           LAT1=-floor(abs(as.numeric(substr(BLOCKX,1,2)))),
+           LONG1=floor(100+as.numeric(substr(BLOCKX,3,4))),
+           LAT1=ifelse(BLOCKX%in%c(96021),-25,LAT1),
+           LONG1=ifelse(BLOCKX%in%c(96021),113,LONG1))%>%
+    filter(!is.na(Effort) | !is.na(LAT1))%>%
+    filter(METHOD=='LL')%>%
+    group_by(Same.return,LAT1,LONG1,zone,FINYEAR)%>%
+    summarise(Effort=max(Effort))%>%
+    ungroup()%>%
+    group_by(LAT1,LONG1,zone,FINYEAR)%>%
+    summarise(Effort=sum(Effort))
+  Spatial.effort_daily.north=Effort.daily.north_blocks%>%
+    rename(METHOD=method,
+           FINYEAR=finyear,
+           BLOCKX=blockx)%>%
+    filter(FINYEAR%in%Relevant.yrs)%>%
+    mutate(Effort=hook.days,
+           LAT1=-floor(abs(as.numeric(substr(BLOCKX,1,2)))),
+           LONG1=floor(100+as.numeric(substr(BLOCKX,3,4))),
+           LAT1=ifelse(BLOCKX%in%c(96021),-25,LAT1),
+           LONG1=ifelse(BLOCKX%in%c(96021),113,LONG1))%>%
+    filter(!is.na(Effort) | !is.na(LAT1))%>%
+    filter(METHOD=='LL')%>%
+    group_by(Same.return.SNo,LAT1,LONG1,zone,FINYEAR)%>%
+    summarise(Effort=max(Effort))%>%
+    ungroup()%>%
+    group_by(LAT1,LONG1,zone,FINYEAR)%>%
+    summarise(Effort=sum(Effort))
   
-  
-  Predictors=c("YEAR","BLOCK","BOAT","MONTH")
-  IDVAR=Predictors
-  Prop.sp=table(d.anlsys$SPECIES)
-  Prop.sp=Prop.sp/sum(Prop.sp)
-  Grp.sp=names(100*Prop.sp[100*Prop.sp<0.1])  #grouped species occurring less than 0.1%
-  
-  Prop.sp=table(DATA.base.case$SPECIES)
-  Prop.sp=Prop.sp/sum(Prop.sp)
-  Grp.sp=names(100*Prop.sp[100*Prop.sp<0.1]) #group species occurring less than 0.1%, otherwise multivars fail
-  Kg.block.year.mn.vesl=d.anlsys
-  Kg.block.year.mn.vesl$SPECIES=as.character(Kg.block.year.mn.vesl$SPECIES)
-  Kg.block.year.mn.vesl$SPECIES=with(Kg.block.year.mn.vesl,
-                                     ifelse(SPECIES%in%Grp.sp,"Other",SPECIES))   
-  Kg.block.year.mn.vesl$SPECIES=factor(Kg.block.year.mn.vesl$SPECIES)
-  
-  Kg.block.year.mn.vesl=aggregate(formula(paste(ResVar,paste(c(MultiVar,Predictors),collapse="+"),sep="~")),
-                                  Kg.block.year.mn.vesl,sum)
-  Kg.block.year.mn.vesl$YEAR=factor(Kg.block.year.mn.vesl$YEAR)
-  Kg.block.year.mn.vesl$BLOCK=factor(Kg.block.year.mn.vesl$BLOCK)
-  Kg.block.year.mn.vesl$BOAT=factor(Kg.block.year.mn.vesl$BOAT)
-  Kg.block.year.mn.vesl$MONTH=factor(Kg.block.year.mn.vesl$MONTH)
-  
-  STore.multi.var.commercial=Multivar.fn(DATA=Kg.block.year.mn.vesl,ResVar="LIVEWT.c",MultiVar=MultiVar,
-                                         Predictors=Predictors,IDVAR=IDVAR,
-                                         Formula=formula("d.res.var~."),DataSets=DataSets)
-  
-  for(s in 1:length(STore.multi.var.observer)) 
+  if(use.NSF)
   {
-    with(STore.multi.var.commercial[[s]],
-         {
-           fn.display.multivar(d=d,IDVAR=IDVAR,Predictors=Predictors,MDS=MDS,
-                               Permanova.table=Permanova.table,
-                               permanova.pairwise=permanova.pairwise,
-                               Simper=Simper,NM=names(STore.multi.var.observer)[s],
-                               hndl=paste(Hndl,"Commercial/",sep="/"),cexMDS=.75)
-         })
+    Spatial.effort=rbind(Spatial.effort_monthly%>%mutate(Fishery='Southern'),
+                         Spatial.effort_daily%>%mutate(Fishery='Southern'),
+                         Spatial.effort_monthly.north%>%mutate(Fishery='Northern'),
+                         Spatial.effort_daily.north%>%mutate(Fishery='Northern'))%>%
+      filter(!is.na(Effort))%>%
+      left_join(FINYrS.gped,by='FINYEAR')
+  }else
+  {
+    Spatial.effort=rbind(Spatial.effort_monthly%>%mutate(Fishery='Southern'),
+                         Spatial.effort_daily%>%mutate(Fishery='Southern'))%>%
+      filter(!is.na(Effort))%>%
+      left_join(FINYrS.gped,by='FINYEAR')
   }
+  
+  WAcoast<-read.table(handl_OneDrive("Data/Mapping/WAcoastPointsNew.txt"), header=T)
+  WAcoast=WAcoast%>%mutate(Latitude=abs(Latitude))
+  p1=Spatial.effort%>%
+    group_by(LAT1,LONG1,Rango,Fishery)%>%
+    summarise(Effort=sum(Effort))%>%
+    group_by(Fishery)%>%
+    mutate(Rel.effort=Effort/max(Effort))%>%
+    ungroup()%>%
+    mutate(LAT1=abs(LAT1))%>%
+    ggplot(aes(LONG1,LAT1))+
+    geom_polygon(data=WAcoast,aes(x=Longitude,y=Latitude),fill="grey90")+
+    geom_raster(aes(fill = Rel.effort))+
+    facet_wrap(~Rango,ncol=2)+
+    scale_fill_gradientn(colours=c('ivory2','gold',"red2","darkred"),
+                         guide = guide_legend(direction="vertical"))+
+    theme_PA(leg.siz=7,axs.t.siz=10,axs.T.siz=14,Sbt.siz=14,strx.siz=11)+
+    theme(
+      legend.title=element_blank(),
+      legend.key.size = unit(.5, 'cm'),
+      legend.position = c(0.94, 0.87))+
+    ylab(expression('Latitude ('*~degree*S*')'))+xlab(expression('Longitude ('*~degree*E*')'))+
+    scale_y_reverse()+xlim(113.5,130)
+  
+  
+  Catch.agg=Spatio.temp.dat%>%
+    mutate(Year=as.numeric(substr(FINYEAR,1,4)))%>%
+    group_by(Year,FisheryZone)%>%
+    summarise(Tons=sum(LIVEWT.c,na.rm=T)/1000)    
+  
+  Eff.agg=Effort.monthly.zone%>%
+    gather(FisheryZone,Effort,-FINYEAR)%>%
+    mutate(Year=as.numeric(substr(FINYEAR,1,4)))
+  
+  p2=Catch.agg%>%
+    ggplot(aes(Year,Tons,fill=FisheryZone))+
+    geom_bar(stat='identity')+
+    #geom_point(size=2)+geom_line(linewidth=1.1,alpha=.4)+ #linetype ='dotted' 
+    ylab('Total landings (tonnes)')+xlab('Financial year')+
+    theme_PA(leg.siz=12,axs.t.siz=10,axs.T.siz=14,str.siz=10)+
+    theme(legend.title = element_blank())
+  
+  p3=Eff.agg%>%
+    ggplot(aes(Year,Effort,fill=FisheryZone))+
+    geom_bar(stat='identity')+
+    #geom_point(size=2)+geom_line(linewidth=1.1,alpha=.4)+
+    ylab('Total effort (1000 km gn days)')+xlab('Financial year')+
+    theme_PA(leg.siz=12,axs.t.siz=10,axs.T.siz=14,str.siz=10)+
+    theme(legend.title = element_blank())
+
+  pp=ggarrange(plotlist=list(p3,p2), common.legend = TRUE,ncol=2)
+  
+  ggarrange(plotlist=list(p1,pp), ncol=1,heights = c(1.3,.7))
+  ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/Catch and effort.tiff"),
+         width = 6,height = 11.5,compression = "lzw")
+  
+  
+  # coeff=max(Eff.agg$Effort)
+  # Eff.agg$Effort.scaled=Eff.agg$Effort/(coeff)
+  # lbs=seq(0,10*ceiling(coeff/10),length.out=4)
+  # lbs=pretty(lbs,n=(length(lbs)-1))
+  # bks=seq(0,10*ceiling(coeff/10),length.out=length(lbs))
+  # bks=pretty(bks,n=(length(bks)-1))
+  # min.lb=min(length(lbs),length(bks))
+  # lbs=lbs[1:min.lb]
+  # bks=bks[1:min.lb]*1000
+  # 
+  # p2+
+  #   geom_line(data=Eff.agg, aes(x=Year, y=Effort.scaled*1000,color=FisheryZone),linewidth=1.1)+
+  #   scale_y_continuous(limits = c(0, NA),sec.axis = sec_axis(~.*coeff, name="",labels = lbs,breaks = bks))
+  
+   
 }
+
+
