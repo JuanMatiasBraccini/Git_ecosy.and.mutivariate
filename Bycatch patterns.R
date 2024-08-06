@@ -39,6 +39,7 @@ library(tidyverse)
 library(Hmisc)
 library(tictoc)
 library(ggpubr)
+require(grid)
 
 #Define working directory
 if(!exists('handl_OneDrive')) source('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias/Analyses/SOURCE_SCRIPTS/Git_other/handl_OneDrive.R')
@@ -150,7 +151,7 @@ traits_ecol=c('Trophic.level.fishbase','Habitat','Movement.scale','Feeding.group
 traits_morph=c('Body.shape','Maximum.size','tmax','Body.depth','Head.length','Eye.diameter','Pre.orbital.length')
 
 
-do.multivariate=FALSE  #focus only on ecological indicators
+do.multivariate=TRUE  #focus only on ecological indicators
 
 display.catch.effort=FALSE
 
@@ -461,8 +462,10 @@ if(do.commercial)
 {
   Data.monthly=Data.monthly%>%
             filter(METHOD=="GN" & zone%in%c('West','Zone1','Zone2') & LATITUDE<=(-26))%>%
+            filter(NETLEN.c>=300 & EFFORT>0)%>%
             dplyr::select(-NETLEN.c)
-  Data.daily=Data.daily%>%filter(METHOD=="GN" & zone%in%c('West','Zone1','Zone2') & LATITUDE<=(-26))
+  Data.daily=Data.daily%>%filter(METHOD=="GN" & zone%in%c('West','Zone1','Zone2') & LATITUDE<=(-26))%>%
+    filter(NETLEN>=300 & EFFORT>0)
   if(combine.daily.monthly)
   {
     Data.daily.agg=Data.daily%>%
@@ -708,12 +711,24 @@ if(do.commercial)
 
 
   #3.5. Put data set in right format 
-Data.list=list(Observer=DATA%>%filter(Fishery=='TDGDLF')%>%select(-Fishery))
+Data.list=list(Observer=DATA%>%filter(Fishery=='TDGDLF' & SOAK_TIME>0.5 & NET_LENGTH>=0.3 &
+                                        EFFORT>0 & MESH_SIZE%in%c(6.5,7))%>%
+                 select(-Fishery))
 if(do.commercial) Data.list$Logbook=Data.monthly
 if(use.NSF)
 {
   Data.list$Observer.north=DATA%>%filter(Fishery=='NSF')%>%select(-Fishery)
   if(do.commercial) Data.list$Logbook.north=Data.monthly.north
+}
+
+#drop dodgie effort
+for(l in 1:length(Data.list))
+{
+  Data.list[[l]]=Data.list[[l]]%>%
+    filter(!is.na(EFFORT))%>%
+    filter(EFFORT>10 & EFFORT<2000)
+  Data.list[[l]]%>%
+    ggplot(aes(round(EFFORT)))+geom_bar()
 }
 
 #drop data sets if not meeting minimum number of record criteria  
@@ -745,6 +760,7 @@ for(l in 1:length(Data.list))
                                        SCIENTIFIC_NAME=='Carcharodon Carcharias'~'Carcharodon carcharias',
                                        SCIENTIFIC_NAME=='Sphyrnidae'~'Sphyrna spp.',
                                        SCIENTIFIC_NAME=='Squatinidae'~'Squatina spp.',
+                                       SCIENTIFIC_NAME=='Lethrinus laticaudis'~'Lethrinus spp.',
                                        SCIENTIFIC_NAME=='Carcharhiniformes'~'Carcharhinus spp.',
                                        TRUE~SCIENTIFIC_NAME),
              SCIENTIFIC_NAME=str_remove(SCIENTIFIC_NAME, '\\.'))
@@ -805,6 +821,80 @@ ggarrange(plotlist=p.list, common.legend = TRUE,ncol=1,heights = hei.vec)
 ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/Species composition.tiff"),
        width = 6.5,height = 10,compression = "lzw")
 
+
+p.list=vector('list',length(Data.list))
+for(l in 1:length(Data.list))
+{
+  NM=names(Data.list)[l]
+  if(NM=="Logbook") NM="TDGDLF"
+  if(NM=="Logbook.north") NM="NSF"
+  
+  ddd=Data.list[[l]]%>%
+    filter(!is.na(EFFORT))
+  
+  dumi=ddd%>%
+    mutate(Ktch=INDIVIDUALS*EFFORT)%>%
+    group_by(SCIENTIFIC_NAME)%>%
+    summarise(Ktch=sum(Ktch))%>%
+    ungroup()%>%
+    arrange(-Ktch)%>%
+    mutate(Cumktch=cumsum(Ktch),
+           Tot=sum(Ktch),
+           Cumktch2=Cumktch/Tot,
+           SCIENTIFIC_NAME2=ifelse(Cumktch2<=0.96,SCIENTIFIC_NAME,'Other'))%>%
+    left_join(All.sp,by='SCIENTIFIC_NAME')
+  nelas=nrow(dumi%>%filter(SCIENTIFIC_NAME2=='Other' & Group== 'Elasmobranch'))
+  ntel=nrow(dumi%>%filter(SCIENTIFIC_NAME2=='Other' & Group== 'Teleost'))
+  dumi=dumi%>%
+    mutate(SCIENTIFIC_NAME2=case_when(SCIENTIFIC_NAME2=='Other' & Group== 'Elasmobranch'~paste0('Other elasmobranchs (n=',nelas,' species)'),
+                                      SCIENTIFIC_NAME2=='Other' & Group== 'Teleost'~paste0('Other teleosts (n=',ntel,' species)'),
+                                      TRUE~SCIENTIFIC_NAME2))
+  
+  ddd=ddd%>%
+    left_join(dumi%>%distinct(SCIENTIFIC_NAME,SCIENTIFIC_NAME2,Group),by='SCIENTIFIC_NAME')%>%
+    dplyr::select(-SCIENTIFIC_NAME)%>%
+    rename(SCIENTIFIC_NAME=SCIENTIFIC_NAME2)%>%
+    mutate(Ktch=INDIVIDUALS*EFFORT)%>%
+    group_by(SCIENTIFIC_NAME,Group)%>%
+    summarise(Ktch=sum(Ktch))%>%
+    ungroup()%>%
+    mutate(color=ifelse(Group=='Teleost','dodgerblue4',
+                        ifelse(Group=='Elasmobranch','firebrick3',NA)),
+           color=ifelse(is.na(color),'forestgreen',color))
+  
+  LVLs=ddd%>%distinct(SCIENTIFIC_NAME,color,Group,Ktch)%>%arrange(desc(Group),Ktch)%>%pull(SCIENTIFIC_NAME)
+  a=ddd%>%distinct(SCIENTIFIC_NAME,color)%>%arrange(factor(SCIENTIFIC_NAME,levels=LVLs))
+  FILL=ddd%>%distinct(SCIENTIFIC_NAME,Group,Ktch)%>%arrange(Group,Ktch)
+  colfunc <- colorRampPalette(c("lightpink", "firebrick4"))
+  FILL.elas=colfunc(nrow(FILL%>%filter(Group=='Elasmobranch')))
+  colfunc <- colorRampPalette(c("cadetblue2", "dodgerblue4"))
+  FILL.tel=colfunc(nrow(FILL%>%filter(Group=='Teleost')))
+  FILL=FILL%>%
+        dplyr::select(-c(Group,Ktch))%>%
+        mutate(FILL=c(FILL.elas,FILL.tel))
+  fill.vec=FILL$FILL
+  names(fill.vec)=FILL$SCIENTIFIC_NAME
+  p.list[[l]]=ddd%>%
+                  mutate(Tot=sum(Ktch),
+                         Prop=100*Ktch/Tot,
+                         SCIENTIFIC_NAME=factor(SCIENTIFIC_NAME,levels=LVLs))%>%
+                  ggplot(aes(SCIENTIFIC_NAME,Prop))+
+                  geom_bar(aes(fill=SCIENTIFIC_NAME),stat="identity", width=1) +
+                  coord_flip()+
+                  scale_fill_manual(values=fill.vec,drop=FALSE)+
+                  ylab('Percentage')+xlab('')+
+                  ggtitle(NM)+
+                  theme_PA(axs.t.siz=10,Ttl.siz=15)+
+                  theme(legend.position = 'none',
+                        plot.title.position = "plot")+
+                  scale_y_continuous(limits = c(0, NA))
+  
+}
+hei.vec=c(1, 0.8)
+if(use.NSF) hei.vec=c(1, 0.8,0.6)
+ggarrange(plotlist=p.list, ncol=1,heights = hei.vec)
+ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/Species composition_pie.tiff"),
+       width = 6.5,height = 10,compression = "lzw")
 
 
 # 4 Ecosystems indicators analyses-----------------------------------------------------------------------
@@ -1002,7 +1092,7 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
   rm(OUT.base.case)
 }
 
-  # Display raw species composition as proportions 
+  # Display raw indicators as proportions 
 p.list=vector('list',length(Store.data.list))
 for(l in 1:length(Store.data.list))
 {
@@ -1057,8 +1147,6 @@ if(use.NSF) hei.vec=c(1, 1,0.6)
 ggarrange(plotlist=p.list, common.legend = TRUE,ncol=1,heights = hei.vec)
 ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/Indicators by year.tiff"),
        width = 6.5,height = 8,compression = "lzw")
-
-
 
 
 
@@ -1132,7 +1220,7 @@ do.call(rbind,Store.out)%>%
   geom_errorbar(aes(ymin = LowCI, ymax = UppCI))+
   #geom_line(alpha=.6,linetype='dotted')+
   facet_wrap(~Indicator,scales='free_y',ncol=2)+
-  scale_y_continuous(limits = c(0, NA))+
+  #scale_y_continuous(limits = c(0, NA))+
   theme_PA(strx.siz=10)+ylab('Relative value')+xlab('Financial year')+
   theme(legend.position = 'top',
         legend.title=element_blank())
@@ -1171,7 +1259,7 @@ do.call(rbind,Store.out)%>%
   geom_errorbar(aes(ymin = LowCI, ymax = UppCI))+
   #geom_line()+
   facet_wrap(~Indicator,scales='free_y',ncol=2)+
-  scale_y_continuous(limits = c(0, NA))+
+#  scale_y_continuous(limits = c(0, NA))+
   theme_PA(strx.siz=10)+ylab('Relative value')+xlab('Month')+
   theme(legend.position = 'top',
         legend.title=element_blank())+
@@ -1199,11 +1287,24 @@ for(l in 1:length(Store.out))
 # 5 Multivariate analyses-------------------------------------------------------------------------
 if(do.multivariate)
 {
+  model.type='gam'
+  if(model.type=='gam')
+  {
+    do.Gam=TRUE
+    do.Lm=FALSE
+  }
+  if(model.type=='lm')
+  {
+    do.Gam=FALSE
+    do.Lm=TRUE
+  }
+  
   Store.out.multi=vector('list',length(Data.list))
   names(Store.out.multi)=names(Data.list)
-  TERMS=c('YEAR','MONTH','LATITUDE','LONGITUDE')
-  #TERM.form='year+s(month, k = 12, bs = "cc")+s(latitude, longitude)+ s(BOAT, bs = "re")'
-  TERM.form='year+month+latitude*longitude'
+  Grouping.vars=c('sheet_no','YEAR','MONTH','LATITUDE','LONGITUDE','BOAT')
+  if(do.Gam) TERM.form.g='year+s(month, k = 12, bs = "cc")+ s(boat, bs = "re")+s(latitude, longitude)'
+  if(do.Lm) TERM.form.g=TERM.form.perm='year+month+latitude*longitude'
+  
   tic()
   for(l in 1:length(Store.out.multi))   
   {
@@ -1214,74 +1315,134 @@ if(do.multivariate)
                                                   MONTH=as.integer(MONTH),
                                                   BLOCK=as.character(BLOCK),
                                                   SPECIES=as.character(SPECIES)),
-                                         Terms=tolower(TERMS),
+                                         Terms=tolower(Grouping.vars),
                                          Def.sp.term=c('species','year'),
                                          Transf='proportion',
                                          Show.term='year',
                                          Group='95',
                                          hndl=handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate"),
-                                         All.species.names=Data.list[[l]]%>%distinct(SPECIES,SCIENTIFIC_NAME),
+                                         All.species.names=rbind(Data.list[[l]]%>%distinct(SPECIES,SCIENTIFIC_NAME),
+                                                                 data.frame(SPECIES="Other",SCIENTIFIC_NAME="Other")),
                                          dat.name=names(Data.list)[l],
-                                         term.form=TERM.form)
+                                         do.gam=do.Gam,
+                                         do.lm=do.Lm,
+                                         term.form.gam=TERM.form.g,
+                                         term.form.permanova=TERM.form.perm,
+                                         dis.lat= c(-29,-34), dis.long=c(114.5,122))
     
   }
-  toc()
-  
-  
-  #Display year effect
-  ddd=rbind(Store.out.multi$Observer$Preds%>%mutate(Dataset='Observer'),
-            Store.out.multi$Logbook$Preds%>%mutate(Dataset='Logbook'),
-            Store.out.multi$Logbook.north$Preds%>%mutate(Dataset='Logbook.north'))%>%
-    mutate(year=as.numeric(as.character(year)))
-  # p1=Store.out.multi$Observer$Preds%>%
-  #      ggplot(aes(year,Median))+
-  #      geom_bar(stat="identity")+
-  #      facet_wrap(~scientific_name,scales='free_y')+
-  #      geom_errorbar(aes(ymin = lower95, ymax = upper95), width = 0.2)+
-  #      scale_y_continuous(limits=c(0, NA))
-  
-  # p2=ddd%>%
-  #   group_by(year)%>%
-  #   mutate(Median.rel=Median/max(Median))%>%
-  #   ggplot(aes(year,Median.rel,fill=scientific_name))+
-  #   geom_bar(stat='identity',position="stack")+
-  #   facet_wrap(~Dataset,ncol=1)+
-  #   theme_PA()+
-  #   theme(legend.position = 'top')
-  
-  ddd%>%
-    group_by(year)%>%
-    mutate(Median.rel=Median/mean(Median))%>%
-    mutate(CPUE=Median)%>%
-    #mutate(CPUE=Median.rel)%>%
-    ggplot(aes(year, scientific_name , fill= CPUE)) + 
-    geom_tile()+
-    scale_fill_gradient2(low="grey85",mid='grey60', high="black")+ylab('')+xlab('Financial year')+
-    facet_wrap(~Dataset,ncol=1,scales='free_y')+
-    theme_PA()+
-    theme(legend.position = 'top')
+
+  #Display year effect 
+    #data sets combined
+  Min.yr=min(Data.list$Logbook$YEAR)
+  Max.yr=max(Data.list$Logbook$YEAR)
+  p.list=vector('list',length(Store.out.multi))
+  names(p.list)=names(Store.out.multi)
+  for(l in 1:length(p.list))
+  {
+    NM=names(Data.list)[l]
+    if(NM=="Logbook") NM="TDGDLF"
+    if(NM=="Logbook.north") NM="NSF"
+    #if(NM=="Observer") NM="Observer (TDGDLF)"
+    
+    ddd=Store.out.multi[[l]]$Preds%>%
+            mutate(year=as.numeric(as.character(year)))%>%
+      left_join(All.sp,by=c('scientific_name'='SCIENTIFIC_NAME'))%>%
+      mutate(color=ifelse(Group=='Teleost','dodgerblue4',
+                   ifelse(Group=='Elasmobranch','firebrick3',NA)),
+             color=ifelse(is.na(color),'black',color))
+    
+    LVLs=ddd%>%distinct(scientific_name,color,Group)%>%arrange(desc(Group),scientific_name)%>%pull(scientific_name)
+    a=ddd%>%distinct(scientific_name,color,Group)%>%arrange(desc(Group),factor(scientific_name,levels=LVLs))
+    
+    ddd=ddd%>%    
+      rename(Proportion=Median)%>%
+      mutate(Proportion=ifelse(Proportion<0,0,Proportion),
+             scientific_name=factor(scientific_name,levels=LVLs))
+    xlAb=''
+    if(l==length(p.list)) xlAb='Financial year'
+    p.list[[l]]=ddd%>%
+                mutate(Zone=ifelse(longitude<116,'West','Zone 2'))%>%
+                ggplot(aes(year, scientific_name , fill= Proportion)) + 
+                geom_tile()+
+                facet_wrap(~Zone,ncol=2)+
+                 scale_fill_gradient(low="lightblue1", high="darkorange4",breaks = seq(0,0.5,length.out=3))+
+                # scale_fill_gradient2(low="lightblue1",mid="darkgoldenrod2", high="brown4",midpoint = mean(range(ddd$Proportion)))+
+                ylab('')+xlab(xlAb)+
+                ggtitle(NM)+
+                theme_PA(axs.t.siz=10,Ttl.siz=15)+
+                theme(legend.position = 'top',
+                      plot.title.position = "plot",
+                      axis.text.y = element_text(colour = a%>%pull(color)))+
+                xlim(Min.yr,Max.yr)
+
+  }
+  hei.vec=c(1, 0.8)
+  if(use.NSF) hei.vec=c(1, 0.8,0.6)
+  ggarrange(plotlist=p.list, common.legend = TRUE,ncol=1,heights = hei.vec)
   ggsave(handl_OneDrive(paste0("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate/","Year prediction_All.tiff")),
          width = 6.5,height = 8,compression = "lzw")
   
+
   
-  Store.out.multi$Logbook$Preds%>%mutate(Dataset='Logbook')%>%
-    group_by(year)%>%
-    mutate(Median.rel=Median/mean(Median))%>%
-    mutate(CPUE=Median)%>%
-    #mutate(CPUE=Median.rel)%>%
-    ggplot(aes(year, scientific_name , fill= CPUE)) + 
-    geom_tile()+
-    scale_fill_gradient2(low="grey85",mid='grey60', high="black")+ylab('')+xlab('Financial year')+
-    theme_PA()+
-    theme(legend.position = 'top',
-          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
-  ggsave(handl_OneDrive(paste0("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate/","Year prediction_Logbook.tiff")),
-         width = 8,height = 6,compression = "lzw")
+  #Display lat and long 
+    #data sets combined
+  p.list=vector('list',length(Store.out.multi))
+  names(p.list)=names(Store.out.multi)
+  for(l in 1:length(p.list))
+  {
+    NM=names(Data.list)[l]
+    if(NM=="Logbook") NM="TDGDLF"
+    if(NM=="Logbook.north") NM="NSF"
+    #if(NM=="Observer") NM="Observer (TDGDLF)"
+    
+    ddd=Store.out.multi[[l]]$Preds.lat.lon%>%
+      left_join(All.sp,by=c('scientific_name'='SCIENTIFIC_NAME'))%>%
+      mutate(color=ifelse(Group=='Teleost','dodgerblue4',
+                          ifelse(Group=='Elasmobranch','firebrick3',NA)),
+             color=ifelse(is.na(color),'black',color))
+    
+    LVLs=ddd%>%distinct(scientific_name,color,Group)%>%arrange(desc(Group),scientific_name)%>%pull(scientific_name)
+    ddd=ddd%>%
+      filter(scientific_name%in%c('Carcharhinus obscurus','Heterodontus portusjacksoni',
+                                  'Mustelus antarcticus','Carcharhinus plumbeus','Furgaleus macki',
+                                  'Nemadactylus valenciennesi'))
+    a=ddd%>%distinct(scientific_name,color,Group)%>%arrange(desc(Group),factor(scientific_name,levels=LVLs))
+    
+    ddd=ddd%>%    
+      rename(Proportion=Median)%>%
+      mutate(Proportion=ifelse(Proportion<0,0,Proportion),
+             scientific_name=factor(scientific_name,levels=LVLs))
+    ylAb=''
+    if(l==length(p.list)) ylAb='Latitude'
+    p.list[[l]]=ddd%>%
+      ggplot(aes(longitude,latitude,size=Proportion))+
+      geom_point()+
+      facet_wrap(~scientific_name,ncol=1)+
+      ylab('')+xlab('Longitude')+
+      ggtitle(NM)+
+      theme_PA(axs.t.siz=10,Ttl.siz=15)+
+      theme(legend.position = 'top')
+    
+  }
+  ggarrange(plotlist=p.list, common.legend = TRUE,ncol=2)
+  ggsave(handl_OneDrive(paste0("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate/","Spatial prediction_All.tiff")),
+         width = 6.5,height = 8,compression = "lzw")
   
-  #ANOVAs
-  tic()
-  ANOVA=anova(Store.out.multi$Logbook$mod)
+  
+  #ANOVAs takes 1.2 hours      #ACA
+  Anov.multi=vector('list',length(Store.out.multi))
+  names(Anov.multi)=names(Store.out.multi)
+  for(l in 1:length(Store.out.multi)) Anov.multi[[l]]=anova(Store.out.multi[[l]]$mod,p.uni="none") #p.uni = "adjusted"
+  for(l in 1:length(Store.out.multi))
+  {
+    write.csv(Anov.multi[[l]]$table,
+              handl_OneDrive(paste0("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate/Anova_",
+                                    names(Anov.multi)[l],".csv")),row.names=T)
+  }
+  
   toc()
+
 }
 
 
@@ -1445,6 +1606,12 @@ if(display.catch.effort)
   
   WAcoast<-read.table(handl_OneDrive("Data/Mapping/WAcoastPointsNew.txt"), header=T)
   WAcoast=WAcoast%>%mutate(Latitude=abs(Latitude))
+  Fishing.zones="Data/Mapping/Shark_shape_files/"
+  SDGDLL_zone1=readOGR(handl_OneDrive(paste0(Fishing.zones,"SDGDLL_zone1.shp")), layer="SDGDLL_zone1") 
+  SDGDLL_zone2=readOGR(handl_OneDrive(paste0(Fishing.zones,"SDGDLL_zone2.shp")), layer="SDGDLL_zone2") 
+  WCDGDLL=readOGR(handl_OneDrive(paste0(Fishing.zones,"WCDGDLL.shp")), layer="WCDGDLL") 
+  
+  
   p1=Spatial.effort%>%
     group_by(LAT1,LONG1,Rango,Fishery)%>%
     summarise(Effort=sum(Effort))%>%
@@ -1461,12 +1628,55 @@ if(display.catch.effort)
     theme_PA(leg.siz=7,axs.t.siz=10,axs.T.siz=14,Sbt.siz=14,strx.siz=11)+
     theme(
       legend.title=element_blank(),
-      legend.key.size = unit(.5, 'cm'),
-      legend.position = c(0.94, 0.87))+
-    ylab(expression('Latitude ('*~degree*S*')'))+xlab(expression('Longitude ('*~degree*E*')'))+
-    scale_y_reverse()+xlim(113.5,130)
+      legend.key.size = unit(.65, 'cm'),
+      legend.position = c(0.90, 0.9),
+      plot.title.position = "plot")+
+    ylab('')+xlab('')+
+    scale_y_reverse()+xlim(113.5,130)+ggtitle('TDGDLF')
   
+  #Observed shots
+  Min.x=109
+  zone.west=WCDGDLL@polygons[[1]]@Polygons[[1]]@coords%>%
+    data.frame%>%
+    mutate(X2=abs(X2))%>%
+    filter(X1>Min.x)
+  zone.zone1=SDGDLL_zone1@polygons[[1]]@Polygons[[1]]@coords%>%
+    data.frame%>%
+    mutate(X2=abs(X2))%>%
+    filter(X1>Min.x)
+  zone.zone2=SDGDLL_zone2@polygons[[1]]@Polygons[[1]]@coords%>%
+    data.frame%>%
+    mutate(X2=abs(X2))%>%
+    filter(X1>Min.x)
   
+  N.shots=Data.list$Observer%>%
+    distinct(SHEET_NO,.keep_all = T)%>%
+    left_join(FINYrS.gped%>%mutate(YEAR=as.numeric(substr(FINYEAR,1,4))),by='YEAR')%>%
+    group_by(Rango,ZONE,LATITUDE,LONGITUDE)%>%
+    tally()
+  
+  p2=N.shots%>% 
+    mutate(Longitude=LONGITUDE,
+           Latitude=abs(LATITUDE))%>%
+    ggplot()+
+    geom_polygon(data=WAcoast,aes(x=Longitude,y=Latitude),fill="grey90")+
+    geom_polygon(data=zone.west,aes(x=X1,y=X2),fill="#F8766D")+
+    geom_polygon(data=zone.zone1,aes(x=X1,y=X2),fill="#00BA38")+
+    geom_polygon(data=zone.zone2,aes(x=X1,y=X2),fill="#619CFF")+
+    geom_point(aes(Longitude,Latitude,size=n),shape=21, fill="grey30", color="black",alpha=0.4)+
+    facet_wrap(~Rango,ncol=1)+
+    theme_PA(leg.siz=7,axs.t.siz=10,axs.T.siz=14,Sbt.siz=14,strx.siz=11)+
+    theme(legend.title=element_blank(),
+          legend.key.size = unit(.45, 'cm'),
+          legend.position = c(0.83, 0.9),
+          #legend.position = c(0.23, 0.965),
+          #legend.direction='horizontal',
+          legend.key = element_rect(fill = "transparent"),
+          plot.title.position = "plot")+
+    ylab('')+xlab('')+
+    scale_y_reverse()+xlim(Min.x,130)+ggtitle('Observer')
+  
+  #Temporal catch and effort
   Catch.agg=Spatio.temp.dat%>%
     mutate(Year=as.numeric(substr(FINYEAR,1,4)))%>%
     group_by(Year,FisheryZone)%>%
@@ -1476,7 +1686,7 @@ if(display.catch.effort)
     gather(FisheryZone,Effort,-FINYEAR)%>%
     mutate(Year=as.numeric(substr(FINYEAR,1,4)))
   
-  p2=Catch.agg%>%
+  p3=Catch.agg%>%
     ggplot(aes(Year,Tons,fill=FisheryZone))+
     geom_bar(stat='identity')+
     #geom_point(size=2)+geom_line(linewidth=1.1,alpha=.4)+ #linetype ='dotted' 
@@ -1484,7 +1694,7 @@ if(display.catch.effort)
     theme_PA(leg.siz=12,axs.t.siz=10,axs.T.siz=14,str.siz=10)+
     theme(legend.title = element_blank())
   
-  p3=Eff.agg%>%
+  p4=Eff.agg%>%
     ggplot(aes(Year,Effort,fill=FisheryZone))+
     geom_bar(stat='identity')+
     #geom_point(size=2)+geom_line(linewidth=1.1,alpha=.4)+
@@ -1492,27 +1702,14 @@ if(display.catch.effort)
     theme_PA(leg.siz=12,axs.t.siz=10,axs.T.siz=14,str.siz=10)+
     theme(legend.title = element_blank())
 
-  pp=ggarrange(plotlist=list(p3,p2), common.legend = TRUE,ncol=2)
-  
-  ggarrange(plotlist=list(p1,pp), ncol=1,heights = c(1.3,.7))
+  pp1=ggarrange(plotlist=list(p2+ rremove("ylab") + rremove("xlab"),p1+ rremove("ylab") + rremove("xlab")),
+                common.legend = FALSE,ncol=2,widths = c(.55,1))
+  pp=ggarrange(plotlist=list(p4,p3), common.legend = TRUE,ncol=2)
+  ggarrange(plotlist=list(annotate_figure(pp1, left = textGrob(expression('Latitude ('*~degree*S*')'), rot = 90, vjust = 1, gp = gpar(cex = 1.3)),
+                                          bottom = textGrob(expression('Longitude ('*~degree*E*')'), gp = gpar(cex = 1.3))),
+                          pp), ncol=1,heights = c(1.3,.7))
   ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/Catch and effort.tiff"),
-         width = 6,height = 11.5,compression = "lzw")
-  
-  
-  # coeff=max(Eff.agg$Effort)
-  # Eff.agg$Effort.scaled=Eff.agg$Effort/(coeff)
-  # lbs=seq(0,10*ceiling(coeff/10),length.out=4)
-  # lbs=pretty(lbs,n=(length(lbs)-1))
-  # bks=seq(0,10*ceiling(coeff/10),length.out=length(lbs))
-  # bks=pretty(bks,n=(length(bks)-1))
-  # min.lb=min(length(lbs),length(bks))
-  # lbs=lbs[1:min.lb]
-  # bks=bks[1:min.lb]*1000
-  # 
-  # p2+
-  #   geom_line(data=Eff.agg, aes(x=Year, y=Effort.scaled*1000,color=FisheryZone),linewidth=1.1)+
-  #   scale_y_continuous(limits = c(0, NA),sec.axis = sec_axis(~.*coeff, name="",labels = lbs,breaks = bks))
-  
+         width = 7,height = 11.5,compression = "lzw")
    
 }
 

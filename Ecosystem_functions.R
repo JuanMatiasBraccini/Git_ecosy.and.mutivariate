@@ -12,15 +12,19 @@
 # "Div.ind.shot"  --> calculates Shannon's and Simpson's diversity, Pielou's evenness and Margalef's richness
 
 
-require(vegan)
+
 #require(BEQI2)
 require(asbio)
 require(marindicators)   #see fishingInBalance() margalef() meanTLLandings() etc etc, lots of functions
 library(FD)   #functional diversity
 library(flextable)
 require(ecodist)
-require(mvabund)
 require(mgcv)
+require(mvabund)
+library(statmod)
+require(tweedie)
+require(pairwiseAdonis)
+require(vegan)
 
 #--FUNCTIONS---
 
@@ -232,6 +236,7 @@ Mst.cmn=function(D)
 }
 
 #gamm approach
+dev.expl=function(MOD) 100*(MOD$null.deviance-MOD$deviance)/MOD$null.deviance
 Mod.fn.gamm=function(d,ResVar,Expl.vars,Predictrs,FactoRs,OFFSET,log.var,add.inter,MixedEff,temporal.autocorr)
 {
   d=d[,match(c(ResVar,Expl.vars),names(d))]
@@ -280,17 +285,35 @@ Mod.fn.gamm=function(d,ResVar,Expl.vars,Predictrs,FactoRs,OFFSET,log.var,add.int
   
   
   #Fit model
-  
-  null.model=gamm(as.formula(paste(ResVar, "~", paste0("1+s(",MixedEff,",bs='re')"),collapse=NULL)), data=d)  
-  
+    #full
   if(temporal.autocorr) 
   {
     model=gamm(Formula, correlation = corARMA(form = ~ 1|YEAR, p = 1), data=d)
   }else
   {
-    model=gamm(Formula, data=d)
+    #model=gamm(Formula, data=d)
+    model=gam(Formula,data=d, method = 'REML')
   }
-  return(list(model=model, null.model=null.model,data=d))
+    #terms deviance
+  Full.model.dev.expl=dev.expl(model)
+  each.term=strsplit(Pred.form, "\\+")[[1]]
+  mods.terms.dev=vector('list',length(each.term))
+  for(m in 1:length(mods.terms.dev))
+  {
+    if(m==1)dummiies=gam(as.formula(paste(ResVar, "~", paste(each.term[m],collapse='+'),collapse=NULL)),data=d, method = 'REML')
+    if(m>1)dummiies=gam(as.formula(paste(ResVar, "~", paste(each.term[1:m],collapse='+'),collapse=NULL)),data=d, method = 'REML')
+    
+    mods.terms.dev[[m]]=data.frame(Term=gsub("[()]","",str_remove(gsub("\\,.*", "", each.term[m]),'s')),
+                                   Dev.explained=dev.expl(dummiies))
+  } 
+  mods.terms.dev=do.call(rbind,mods.terms.dev)%>%
+                    mutate(lagged=lag(Dev.explained),
+                           lagged=ifelse(is.na(lagged),0,lagged),
+                           Dev.explained=Dev.explained-lagged)%>%
+                    dplyr::select(-lagged)
+  
+  
+  return(list(model=model, data=d,mods.terms.dev=mods.terms.dev,Full.model.dev.expl=Full.model.dev.expl))
 }
 
 #glm approach
@@ -683,9 +706,12 @@ fun.pred=function(d,Show.pred,normalised,PredictorS,log.var,MDL,BY=1)
   NEWDATA=cbind(NEWDATA,d.frm)
   if(MDL=='gamm')
   {
-    Covar.pos=as.matrix(vcov(d$model$gam))
-    Koef=coef(d$model$gam)
-    model=d$model$gam
+    mdl=d$model
+    if("gamm"%in%class(mdl)) mdl=d$model$gam
+      
+    Covar.pos=as.matrix(vcov(mdl))
+    Koef=coef(mdl)
+    model=mdl
   }
     
   if(MDL=='glm')
@@ -1136,7 +1162,7 @@ fn.calc.ecol.ind=function(DaTA,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1)
         if(!is.numeric(traits_sp[,g]))
         {
           UU=traits_sp[,g]
-          U=unique(UU)  #ACA convert character to numeric
+          U=unique(UU)  
           Riplase=data.frame(U,1:length(U))
           Nm=colnames(traits_sp)[g]
           names(Riplase)=c(Nm,'Rep')
@@ -1193,7 +1219,7 @@ fn.calc.ecol.ind=function(DaTA,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1)
         if(!is.numeric(traits_sp[,g]))
         {
           UU=traits_sp[,g]
-          U=unique(UU)  #ACA convert character to numeric
+          U=unique(UU)  
           Riplase=data.frame(U,1:length(U))
           Nm=colnames(traits_sp)[g]
           names(Riplase)=c(Nm,'Rep')
@@ -1320,34 +1346,38 @@ fn.apply.model=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,
       
       Modl=Store.mod.out[[i]]$model
       
+      if("gamm"%in%class(Modl))
+      {
+        fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"gamm_lme",sep="_"),2000,2000)
+        fv <- exp(fitted(Modl$lme)) ## predicted values (including re)
+        rsd <- (Modl$gam$y - fv)/sqrt(fv) ## Pearson residuals (Poisson case)
+        op <- par(mfrow=c(1,2))
+        qqnorm(rsd)
+        plot(fv^.5,rsd)
+        dev.off()
+        
+        fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"autocorrelation",sep="_"),2000,2000)
+        par(mfcol=c(2,1))
+        acf(residuals(Modl$gam),main="raw residual ACF (gamm)") 
+        acf(residuals(Modl$lme),main="raw residual ACF (lme)")
+        dev.off()
+        
+        Modl=Modl$gam
+      }
+      
       fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"continuous",sep="_"),2000,2000) 
       par(mfcol=c(2,2))
-      plot(Modl$gam,pages=1,all.terms=TRUE)
+      plot(Modl,pages=1,all.terms=TRUE)
       dev.off()
       
       fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"factor",sep="_"),2000,2000)
-      vis.gam(Modl$gam)
+      vis.gam(Modl)
       dev.off()
       
       fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"fit",sep="_"),2000,2000) 
       par(mfcol=c(2,2))
-      gam.check(Modl$gam,pages=1)
+      gam.check(Modl,pages=1)
       dev.off()
-      
-      fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"gamm_lme",sep="_"),2000,2000)
-      fv <- exp(fitted(Modl$lme)) ## predicted values (including re)
-      rsd <- (Modl$gam$y - fv)/sqrt(fv) ## Pearson residuals (Poisson case)
-      op <- par(mfrow=c(1,2))
-      qqnorm(rsd)
-      plot(fv^.5,rsd)
-      dev.off()
-      
-      fn.fig(paste("Fit/GAMM_",dat.nm,names(Store.mod.out)[i],"autocorrelation",sep="_"),2000,2000)
-      par(mfcol=c(2,1))
-      acf(residuals(Modl$gam),main="raw residual ACF (gamm)") 
-      acf(residuals(Modl$lme),main="raw residual ACF (lme)")
-      dev.off()
-
     }
   }
   if(do.glm)
@@ -1367,10 +1397,11 @@ fn.apply.model=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,
   for(i in 1:n.rv)
   {
     Modl=Store.mod.out[[i]]$model
+    if("gamm"%in%class(Modl)) Modl=Modl$gam
     if(do.gamm)
     {
       #each term
-      Anova.tab=anova(Modl$gam)
+      Anova.tab=anova(Modl)
       
       Anova.smoothers=Anova.tab$s.table%>%
         data.frame()%>%
@@ -1424,16 +1455,26 @@ fn.apply.model=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,
         Anova.tab=rbind(Anova.tab,dd)
       }
     }
+    #deviance.expl= round(dev.expl(Modl),1) 
+    qq=Anova.tab%>%
+                mutate(Term=gsub("[()]","",str_remove(gsub("\\,.*", "", Term),'s')),
+                       Indicator=names(TABL)[i])%>%
+                left_join(Store.mod.out[[i]]$mods.terms.dev,by='Term')%>%
+                relocate(Indicator,Term,Dev.explained)
+    qq1=qq[1,]
+    qq1[,-1]=''
+    qq1=qq1%>%
+      mutate(Term='Total',
+             Dev.explained=Store.mod.out[[i]]$Full.model.dev.expl)
+    TABL[[i]]=rbind(qq,qq1)%>%mutate(Term=ifelse(Term=='LATITUDE','LATITUDE x LONGITUDE',Term))
     
-    TABL[[i]]=Anova.tab%>%
-                mutate(Indicator=names(TABL)[i])%>%
-                relocate(Indicator)
   }
   TABL=do.call(rbind,TABL)
   if(do.gamm)
   {
     #export anova tables as word doc   
     Export.tbl(WD=getwd(),Tbl=TABL,Doc.nm=paste("Anova.table",dat.nm,sep="_"))
+    write.csv(TABL,paste0(paste(paste(getwd(),"Anova.table",sep='/'),dat.nm,sep="_"),'.csv'),row.names = F)
   }
   if(do.glm)
   {
@@ -1466,27 +1507,27 @@ fn.apply.model=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,
   for(i in 1:n.rv)
   {
     Year=fun.pred(d=Store.mod.out[[i]],  
-                Show.pred="YEAR",
-                normalised=normalised,
-                PredictorS=subset(Predictors,Predictors%in%idvarS),
-                log.var=Res.var.in.log[i],
-                MDL=MDL)
-    
+                  Show.pred="YEAR",
+                  normalised=normalised,
+                  PredictorS=subset(Predictors,Predictors%in%idvarS),
+                  log.var=Res.var.in.log[i],
+                  MDL=MDL)
+      
     Month=fun.pred(d=Store.mod.out[[i]],
-             Show.pred="MONTH",
-             normalised=normalised,
-             PredictorS=subset(Predictors,Predictors%in%idvarS),
-             log.var=Res.var.in.log[i],
-             MDL=MDL,
-             BY=1)
+                   Show.pred="MONTH",
+                   normalised=normalised,
+                   PredictorS=subset(Predictors,Predictors%in%idvarS),
+                   log.var=Res.var.in.log[i],
+                   MDL=MDL,
+                   BY=1)
     
     Lat.Long=fun.pred(d=Store.mod.out[[i]],
-                      Show.pred=c("LATITUDE","LONGITUDE"),
-                      normalised=normalised,
-                      PredictorS=subset(Predictors,Predictors%in%idvarS),
-                      log.var=Res.var.in.log[i],
-                      MDL=MDL,
-                      BY=0.5)    
+                          Show.pred=c("LATITUDE","LONGITUDE"),
+                          normalised=normalised,
+                          PredictorS=subset(Predictors,Predictors%in%idvarS),
+                          log.var=Res.var.in.log[i],
+                          MDL=MDL,
+                          BY=0.5)    
         
     aa=rbind(Year,Month,Lat.Long)
     
@@ -1618,17 +1659,367 @@ plot.comm=function(dat.plt,MAIN,Cx,YLIM,Cx.axs)
   with(dat.plt,axis(1,seq(yr[1],yr[length(yr)],5),F,tck=-0.05))
 }
 
-#multivariate analysis
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+#multivariate analysis 
+manyany.fixed = function(formula, fn, family="negative.binomial", data=NULL, composition = FALSE, block = NULL, get.what="details", var.power=NA, na.action = "na.exclude", ...)
+{
+  #MANYANY - applies a function of your choice to each column of YMAT and computes logLik by taxon.
+  # FORMULA is the formula to use in the call to FM.
+  # FN is a character vector giving the name of the function to be applied to each taxon.  e.g. "glm"
+  # a FAMILY argument needs to be specified. It can be a list with different families for different variables (with length matching the number of columns in YMAT)
+  # COMPOSITION is a logical switch indicating whether or not to do a compositional analysis (i.e., include a
+  #  row effect in the model to account for changes in total abundance across samples).
+  # VAR.POWER is needed for tweedie distributions - the power parameter needs to be specified here as well as in the family argument.
+  # ... any further arguments required by FN.
+  #
+  # Examples:
+  # require(mvabund)
+  # data(spider)
+  # abund=spider$abund
+  # X=data.frame(spider$x)
+  # 
+  # a manygam:
+  # library(mgcv)
+  # ft=manyany(abund~s(soil.dry),"gam",data=X,family="poisson")
+  # 
+  # a manyglmm:
+  # library(lme4)
+  # gr = rep(1:2,each=14)
+  # ft=manyany(abund~soil.dry+1|gr,"lmer",data=X,family="poisson")
+  #
+  ## A manyglm:
+  # ft=manyany(abund~soil.dry,"glm",data=X,family="poisson")
+  ## note this gives the same answer as:  
+  # ft=manyglm(mvabund(abund)~X$soil,family="poisson")
+  
+  #Now compatible with ordinal data, but note that linear predictor is for the lowest
+  #category only, whereas fitted is for the observed category.
+  
+  
+  tol=1.e-8 #for truncation of linear predictor
+  
+  #get the formula for extracting the data frame
+  if(fn=="gam")
+    mFormula = mgcv::interpret.gam(formula)$fake.formula
+  else
+    mFormula = formula
+  
+  if(missing(data)) # Only coerce to model frame if not specified by the user.
+  {
+    mf =model.frame(mFormula, parent.frame())
+  }
+  else
+    mf = model.frame(mFormula,data=data)
+  
+  # get response and its dimensions
+  yMat = model.response(mf)
+  yMat = as.matrix(yMat)
+  n.rows = dim(yMat)[1]
+  n.vars = dim(yMat)[2]
+  
+  # for clm, need to change family argument and make each column of response a factor
+  if(fn=="clm")
+  {
+    allargs <- match.call(expand.dots = FALSE)
+    dots <- allargs$...
+    if( "link" %in% names(dots) )
+      link <- dots$link
+    else
+      link="logit"
+    if(link=="loglog")
+      fam.i = binomial("cloglog") #to avoid errors since "loglog" is not defined
+    else
+      fam.i = binomial(link) #although not binomial
+    fam.i$family = "ordinal"
+    fam = vector(mode="list",length=n.vars)
+    family=fam
+    # convert data to a dataframe of factors:
+    yMat = data.frame(yMat, stringsAsFactors=TRUE) #converting to data frame so factor input is read as factors
+    for(iVar in 1:n.vars)
+      yMat[,iVar] = as.factor(yMat[,iVar])
+  }
+  
+  # get names for response, or assign if empty
+  yNames = dimnames(yMat)
+  if(is.null(yNames[[1]]))
+    yNames[[1]] = 1:n.rows
+  if(length(yNames)==1)
+    yNames[[2]] = paste("y",1:n.vars,sep="")
+  #    yNames[[2]] = "y" #to avoid issues later.
+  
+  call=match.call()
+  
+  # fix this bit later  
+  if(composition==TRUE)
+  {
+    yVec    = as.vector(yMat)
+    rows     = factor(rep(1:n.rows,n.vars))
+    cols     = factor(rep(1:n.vars,each=n.rows))
+    mf    = data.frame(mf[rows,],rows,cols)
+    formula = formula(paste(formula[2],"~rows+cols+cols:(",formula[3],")",sep=""))
+    n.rows.orig = n.rows #save for later
+    n.vars.orig = n.vars #save for later
+    n.rows  = length(yVec)
+    n.vars  = 1
+    names(yVec) = paste( yNames[[2]][cols], ".", yNames[[1]][rows], sep="")
+    yMat    = as.matrix(yVec)
+    if(inherits(family,"family")==FALSE & length(family)>1)
+      stop("when using composition=TRUE, family argument must have length one.")
+    if(is.null(block))  #to make sure resampling is by row of original data, not of vectorised data.
+      block = rows
+    else
+      block = block[rows]
+  }
+  
+  #If family is specified once, turn it into a list of n.vars family objects
+  if(inherits(family,"family") || length(family)==1)
+  {
+    fam = family #temporary store to slot into a big list
+    family = vector("list",n.vars)
+    for(i.var in 1:n.vars)
+      family[[i.var]] = fam
+  }
+  if(length(family)!=n.vars)
+    stop("family argument has length more than one but not equal to the number of columns in yMat (!?)")
+  
+  if(length(var.power)==1)
+    var.power=rep(var.power,n.vars)
+  
+  fam = family
+  
+  # now ensure each family is a proper family function
+  for(i.var in 1:n.vars)
+  {
+    if (is.character(family[[i.var]])) 
+    {
+      if (family[[i.var]] == "negbinomial" || family[[i.var]]=="negative.binomial")
+      {
+        fam[[i.var]] = negative.binomial(10^6)
+        fam[[i.var]]$family = family[[i.var]]
+      }
+      else if (family[[i.var]] == "binomial(link=logit)")
+      {
+        fam[[i.var]] = binomial()
+        fam[[i.var]]$family = family[[i.var]]
+      }
+      else if (family[[i.var]] == "binomial(link=cloglog)" || family[[i.var]] == "cloglog")
+      {
+        fam[[i.var]] = binomial("cloglog")
+        fam[[i.var]]$family = family[[i.var]]
+      }
+      else
+      {
+        fam.fn = get(fam[[i.var]], mode = "function", envir = parent.frame())        
+        fam[[i.var]] = fam.fn()
+      }  
+    }
+    if(fn=="clm")
+      fam[[i.var]] = family[[i.var]] = fam.i
+    if(fam[[i.var]]$family=="binomial")
+      warning("The binomial option of manyany currently assumes you have binary (presence/absence) response")
+  }
+  
+  # find response variable in mf (should be first but better safe than sorry)
+  nameOfResponse  = as.character(formula[[2]])
+  whichIsResponse = which(names(mf)==nameOfResponse)
+  
+  # set up empty objects
+  manyfit = vector(mode="list",length=n.vars)
+  fits = matrix(NA,n.rows,n.vars)
+  etas = matrix(NA,n.rows,n.vars)
+  params = manyfit
+  logL = rep(NA,n.vars)
+  
+  # fit model sequentially for each variable
+  for(i.var in 1:n.vars)
+  {
+    # change response to just column iVar
+    mf[[1]] = yMat[,i.var]
+    
+    # refit model via do.call
+    manyfit[[i.var]] = do.call(fn, list(formula=formula, family=family[[i.var]], data=mf, na.action=na.action, ...)) #note use of family argument as originally specified
+    
+    # store logL, or get from dviance if undefined
+    logL[i.var]  = logLik(manyfit[[i.var]])
+    if(is.na(logL[i.var]))
+      logL[i.var] = -0.5*deviance(manyfit[[i.var]]) #just in case logL function is undefined, e.g. tweedie 
+    
+    # only get extra stuff if get.what says to... this is skipped by anova.manyany
+    if(get.what=="details"||get.what=="models")
+    {
+      fits[,i.var] = fitted(manyfit[[i.var]])
+      
+      etas[,i.var] = switch(fn,
+                            "lmer"=manyfit[[i.var]]@eta,
+                            "clm"=predict(manyfit[[i.var]],type="linear.predictor",newdata=mf)$eta1,
+                            predict(manyfit[[i.var]])
+      )
+      #need to then truncate as if on logit scale...
+      if(substr(fam[[i.var]]$family,1,3)=="bin" || fam[[i.var]]$family=="ordinal") #truncate linear predictor to more reasonable range
+      {
+        etas[,i.var] = pmax(etas[,i.var], fam[[i.var]]$linkfun(tol)/2)
+        etas[,i.var] = pmin(etas[,i.var], fam[[i.var]]$linkfun(1-tol)/2)
+      }
+      if(fam[[i.var]]$link=="log"||fam[[i.var]]$link=="mu^0") #truncate linear predictor to more reasonable range
+        etas[,i.var] = pmax(etas[,i.var], log(tol)/2)
+      if(i.var==1)
+      {
+        cf = try(coef(manyfit[[i.var]]),silent=TRUE) #don't know if this function is defined
+        if(inherits(cf, "try-error"))
+        {
+          do.coef   = FALSE
+          coefs     = NULL
+        } 
+        else
+        {
+          coefs     = vector(mode="list",n.vars)
+          coefs[[1]] = cf
+          names(coefs[[1]])=dimnames(cf)[[1]]
+          if(composition==FALSE & n.vars>1) #only name y variable if not compositional model
+            names(coefs)=yNames[[2]]
+          do.coef   = TRUE
+        }
+      }
+      else
+      {
+        if(do.coef==TRUE)
+          coefs[[i.var]] = coef(manyfit[[i.var]])
+      }
+      if(fam[[i.var]]$family=="poisson")
+        params[[i.var]] = list(q=yMat[,i.var],lambda=fits[,i.var])
+      if(substr(fam[[i.var]]$family,1,3)=="bin")
+        params[[i.var]] = list(q=yMat[,i.var],prob=fits[,i.var],size=1)
+      if(fam[[i.var]]$family=="Tweedie")
+        params[[i.var]] = list(q=yMat[,i.var], power=var.power[i.var], mu=fits[,i.var], phi=summary(manyfit[[i.var]])$disp)
+      if(fam[[i.var]]$family=="ordinal")
+        params[[i.var]] = list(q=yMat[,i.var], mu=predict(manyfit[[i.var]], type="cum.prob"), muAll=predict(manyfit[[i.var]],type="cum.prob",newdata=mf[-whichIsResponse])$cprob2)
+      if(grepl("egative",fam[[i.var]]$family) || fam[[i.var]]$family == "negbinomial")
+      {
+        if(any(names(manyfit[[i.var]])=="theta"))
+          theta=manyfit[[i.var]]$theta
+        else
+        {
+          if(any(names(manyfit[[i.var]])=="phi"))
+            theta = 1/manyfit[[i.var]]$phi
+          else # otherwise it must be fixed and tied up in the family argument 
+            theta = 1/(fam[[i.var]]$var(1)-1)
+        }
+        params[[i.var]] = list(q=yMat[,i.var],mu=fits[,i.var],size=theta)
+      }
+      if(fam[[i.var]]$family=="gaussian")
+      {
+        s.ft=summary(manyfit[[i.var]])
+        if(any(names(s.ft)=="sigma"))
+          sd=s.ft$sigma
+        else
+          sd=s.ft$scale
+        params[[i.var]] = list(q=yMat[,i.var],mean=fits[,i.var],sd=sd)
+      }
+    } #end get.what if statement
+  } #end i.var loop
+  object=list(logL=logL, get.what=get.what)
+  
+  #now format predictions and get residuals, if required
+  if(get.what=="details"||get.what=="models")
+  {
+    if(composition==TRUE) #reshape to original data size if required
+    {
+      fits   = matrix(fits,n.rows.orig,n.vars.orig)
+      etas   = matrix(etas,n.rows.orig,n.vars.orig)
+    }    
+    else #only name y variables for logL and params if not compositional model
+    {
+      if(n.vars>1)
+      {
+        names(logL) = yNames[[2]]
+        names(params) = yNames[[2]]
+      }
+    }
+    attributes(logL)$df = attributes(logLik(manyfit[[i.var]]))$df
+    attributes(logL)$nobs = n.rows
+    class(logL) = "logLik"
+    resids = residuals.manyany(list(params=params, family=fam, composition=composition, fitted.values=fits, get.what=get.what))
+    dimnames(resids) = yNames
+    dimnames(fits)   = yNames
+    dimnames(etas)   = yNames
+    mf[[1]] = yMat #DW, 3/2/22 change: return full response
+    object=list(logL=logL,fitted.values=fits,residuals=resids,linear.predictor=etas,family=fam, coefficients = coefs, call=call,params=params,model=mf, terms = terms(manyfit[[i.var]]), formula=formula, block=block, composition=composition, get.what=get.what)
+    #    object=list(logL=logL,fitted.values=fits,residuals=resids,linear.predictor=etas,family=fam, coefficients = coefs, call=call,params=params,model=model.frame(manyfit[[i.var]]), terms = terms(manyfit[[i.var]]), formula=formula, block=block, composition=composition, get.what=get.what)
+  }
+  if(get.what=="models") #also return the model fits, if requested
+  {
+    object$fits = manyfit
+    names(object$fits) = yNames[[2]]
+  }
+  class(object)=c("manyany", class(manyfit[[i.var]]) )
+  return(object)
+} 
+residuals.manyany<- function(object, ...)
+{
+  if(object$get.what!="details" & object$get.what!="models")
+    stop("To compute residuals, set get.what='details' in your manyany call")
+  tol=1.e-6
+  params = object$params
+  n.rows = length(params[[1]]$q)
+  n.vars = length(params)
+  if(length(object$family)==1)
+    family = rep(object$family,n.vars)
+  else
+    family=object$family
+  resids=matrix(NA,n.rows,n.vars)
+  dimnames(resids)[[1]] = names(params[[1]]$yMat)
+  dimnames(resids)[[2]] = names(params)
+  for(i.var in 1:n.vars)
+  {
+    if(family[[i.var]]$family=="ordinal")
+    {
+      u = runif(n.rows)
+      resids[,i.var] = u*params[[i.var]]$mu$cprob1 + (1-u)*params[[i.var]]$mu$cprob2      
+    }
+    else
+    {
+      param.minus = params[[i.var]]
+      param.minus$q = params[[i.var]]$q - tol
+      if(grepl("egative",family[[i.var]]$family) || family[[i.var]]$family == "negbinomial")
+        pfn = "pnbinom"
+      if(family[[i.var]]$family=="poisson")
+        pfn = "ppois"
+      if(substr(family[[i.var]]$family,1,3)=="bin")
+        pfn = "pbinom"
+      if(family[[i.var]]$family=="gaussian")
+      {
+        pfn = "pnorm"
+        param.minus$q = params[[i.var]]$q
+      } 
+      if(family[[i.var]]$family=="Tweedie")
+        pfn = "ptweedie"
+      u = runif(n.rows)
+      #to avoid any values identically 1:
+      pMinus = pmin(do.call(pfn, param.minus), 1-tol)
+      resids[,i.var] = u*do.call(pfn, params[[i.var]]) + (1-u)*pMinus
+    }
+  }
+  if(object$composition==TRUE) #reshape to original data size if required
+    resids = matrix(resids, dim(object$fitted)[1], dim(object$fitted)[2])
+  resids=qnorm(resids)
+  return(resids)
+}
 multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
                          simper.cumsum=0.85,LGSIZE=12,
                          All.species.names,
-                         dat.name,do.MDS=FALSE,do.pcoa=TRUE,
+                         dat.name,do.MDS=FALSE,do.pcoa=FALSE,
                          do.permanova=FALSE,do.simper=FALSE,do.mvabund=TRUE,
                          do.gam=FALSE,do.tweedie=FALSE,do.lm=TRUE,
-                         term.form)
+                         term.form.gam,term.form.permanova,use.Other=TRUE,group.ordination=FALSE,
+                         dis.lat,dis.long)
 {
   names(d)=tolower(names(d))
   
+  #Define what species are grouped
   what.species=d%>%
     group_by_at(Def.sp.term)%>%
     summarise(n=sum(individuals,na.rm=T))%>%
@@ -1645,8 +2036,8 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
   if(Group=='95') what.species=what.species%>%mutate(species2=ifelse(Cumktch<=0.95,species,'Other'))
   if(Group=='Top20') what.species=what.species%>%mutate(species2=ifelse(Row<=20,species,'Other'))
   what.species=what.species%>%
-    distinct(species,species2)%>%
-    filter(!species2=='Other')
+    distinct(species,species2)
+  if(!use.Other) what.species=what.species%>%filter(!species2=='Other')
   
   
   d=d%>%
@@ -1664,7 +2055,7 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
   if(Transf=='proportion') d[-match(c(Terms,'ColSum'),names(d))]=d[-match(c(Terms,'ColSum'),names(d))]/d$ColSum
   d=d%>%
     dplyr::select(-ColSum)%>%
-    data.frame
+    data.frame%>%mutate(boat=factor(boat))
   
   dd = d[,-match(Terms,names(d))]
   drop.this=which(rowSums(dd)==0)
@@ -1673,37 +2064,50 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
   rownames(d)=paste0('id.',1:nrow(d))
   Community = d[,-match(Terms,names(d))]
   if(Transf=='sqrt')Community = sqrt(Community)
+  
+  Terms.part=d[,match(Terms,names(d))]
 
   #1. Ordination
-    #MDS 
+    #1.1 MDS 
   if(do.MDS)
   {
     MDS <- metaMDS(comm = Community, distance = "bray",k=2,trymax=100, trace = FALSE, autotransform = FALSE)
-    MDS_xy <- data.frame(MDS$points)
-    MDS_xy$dummy <- d[,match(Show.term,names(d))]
+    mds.envfit <- envfit(MDS, Terms.part, permutations = 999) # this fits environmental vectors
+    mds.spp.fit <- envfit(MDS, Community, permutations = 999) # this fits species vectors
     
-    p=ggplot(MDS_xy, aes(MDS1, MDS2, color = dummy)) +
-      geom_point(size=3) +
-      annotate(geom="text", x=0.85*max(MDS_xy$MDS1), y=min(MDS_xy$MDS2), 
-               label=paste("Stress=",round(MDS$stress,3)))+
-      theme_PA(leg.siz=14,axs.t.siz=12,axs.T.siz=14)+
-      theme(legend.position = "top",
-            legend.title = element_blank())+
-      guides(colour = guide_legend(nrow = 3))+
-      xlab('')+ylab('')
-    print(p)
+    #create dataframes
+    site.scrs <- as.data.frame(scores(MDS, display = "sites")) #save NMDS results into dataframe
+    site.scrs <- cbind(site.scrs,Terms.part) #add grouping variable "ecosystem" to dataframe
+    
+    
+    #okay, plot it up
+    nmds <- site.scrs%>%
+            mutate(year=as.numeric(as.character(year)))%>%
+            ggplot(aes(x=NMDS1, y=NMDS2,colour = year))+ #sets up the plot
+            geom_point(aes(NMDS1, NMDS2, colour = year),alpha = 0.4, size = 4)+ #adds site points to plot, shape determined by Landuse, colour determined by Management
+            coord_fixed()+
+            annotate(geom="text", x=0.85*max(site.scrs$NMDS1,na.rm=T), y=min(site.scrs$NMDS2,na.rm=T), 
+                     label=paste("Stress=",round(MDS$stress,3)))+
+            theme_PA(leg.siz=14,axs.t.siz=12,axs.T.siz=14)+
+            theme(legend.title = element_blank())+
+            xlab('')+ylab('')
+    print(nmds)
     ggsave(paste(hndl,'/MDS_',dat.name,'.tiff',sep=""),width = 6,height = 6,compression = "lzw")
     
   }
   
-    #PCOA
+    #1.2 PCOA
   if(do.pcoa)
   {
     Comm=Community
     Comm$dummy <- d[,match(Show.term,names(d))]
-    Comm=Comm%>%
-      group_by(dummy) %>%
-      summarise_all("mean")
+    if(group.ordination)
+    {
+      Comm=Comm%>%
+        group_by(dummy) %>%
+        summarise_all("mean")
+    }
+      
     
     Community.bray <- vegan::vegdist(Comm%>%dplyr::select(-dummy), method = "bray") 
     pcoaVS <- pco(Community.bray, negvals = "zero", dround = 0) 
@@ -1712,25 +2116,38 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
     PCOA_xy <- as.data.frame(PCOA_xy)
     PCOA_xy$dummy <- Comm$dummy
     PCOA_xy$kolor=colorRampPalette(c("cyan4","cornflowerblue", "blue4"))(nrow(PCOA_xy))
-    p=PCOA_xy%>%                 
-      ggplot(aes(x = V1, y = V2)) +
-      geom_point(color = "transparent") +
-      geom_segment(aes(xend = after_stat(lead(x)), yend = after_stat(lead(y)),colour = kolor),
-                   arrow = arrow(length = unit(4, "mm")),linewidth=1.25) +
-      geom_text(aes(label = dummy), size = 5, fontface = 2,alpha=0.6) +
-      labs(x = "PCOA1", y = "PCOA2")+
-      theme_PA(leg.siz=14,axs.t.siz=12,axs.T.siz=14)+
-      theme(legend.position = "none")+scale_colour_identity()
+    
+    if(group.ordination)
+    {
+      p=PCOA_xy%>%                 
+        ggplot(aes(x = V1, y = V2)) +
+        geom_point(color = "transparent") +
+        geom_segment(aes(xend = after_stat(lead(x)), yend = after_stat(lead(y)),colour = kolor),
+                     arrow = arrow(length = unit(4, "mm")),linewidth=1.25) +
+        geom_text(aes(label = dummy), size = 5, fontface = 2,alpha=0.6) +
+        labs(x = "PCOA1", y = "PCOA2")+
+        theme_PA(leg.siz=14,axs.t.siz=12,axs.T.siz=14)+
+        theme(legend.position = "none")+scale_colour_identity() 
+    }else
+    {
+      p=PCOA_xy%>%
+        mutate(dummy=as.numeric(as.character(dummy)))%>%
+        ggplot(aes(x = V1, y = V2)) +
+        geom_point(aes(color = dummy),alpha = 0.4, size = 4) +
+        labs(x = "PCOA1", y = "PCOA2")+
+        theme_PA(leg.siz=14,axs.t.siz=12,axs.T.siz=14)
+    }
+    
     print(p)
     ggsave(paste(hndl,'/PCOA_',dat.name,'.tiff',sep=""),width = 6,height = 6,compression = "lzw")
     
   }
   
   #2. Multi stats
-    #mvabund
+    #2.1 mvabund
   if(do.mvabund)
   {
-    spp_mat <- mvabund(Community)
+    spp_mat <- mvabund(as.matrix(Community))
     
     explore.dis=FALSE
     if(explore.dis)
@@ -1755,12 +2172,14 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
         geom_bar(stat="identity")+
         facet_wrap(~species,scales='free_y')
     }
-    Terms.part=d[,match(Terms,names(d))]
     
-    if(do.gam) #gam doesn't work, bug in function
+    
+    if(do.gam) 
     {
-      mod <- manyany(formula=formula(paste('spp_mat',term.form,sep='~')),fn='gam',    
-                     family = gaussian(link = "identity"),data=Terms.part)
+       mod <- manyany.fixed(formula=formula(paste('spp_mat',term.form.gam,sep='~')),fn='gam',    
+                      family = gaussian(link = "identity"),data=Terms.part)
+      #mod <- manyany.fixed(formula=formula(paste('spp_mat',term.form.gam,sep='~')),fn='gam',    
+      #                      family = betar(link="logit"),data=Terms.part)
     }
     if(do.tweedie) #predictions don't work but yields same coefs as lm
     {
@@ -1770,44 +2189,126 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
     }
     if(do.lm)
     {
-      mod <- manylm(formula=formula(paste('spp_mat',term.form,sep='~')),data=Terms.part)
+      mod <- manylm(formula=formula(paste('spp_mat',term.form.gam,sep='~')),data=Terms.part)
     }
     
-    #Predict year effect
+    #Predict year effect for Albany
     NEWDATA=data.frame(unique(Terms.part[,Show.term]))
     colnames(NEWDATA)=Show.term
-    add.dis=Terms.part[,-match(Show.term,names(Terms.part))]%>%summarise_all(mean)%>%summarise_all(round)
-    NEWDATA=cbind(NEWDATA,add.dis)
-
-    Preds=predict(mod, newdata=NEWDATA, se.fit = TRUE,type = "response")
+    add.dis1=Terms.part[,-match(Show.term,names(Terms.part))]
+    add.dis=add.dis1[1,]
+    for(o in 1:ncol(add.dis))
+    {
+      if(is.character(add.dis1[,o])|is.factor(add.dis1[,o])) sss=Mode(add.dis1[,o])
+      if(is.numeric(add.dis1[,o])) sss=mean(add.dis1[,o],na.rm=T)
+      add.dis[,o]=sss
+    }
+    if(length(dis.lat)>1)
+    {
+      add.dis=rbind(add.dis, add.dis[rep(1, length(dis.lat)-1), ])%>%
+        mutate(latitude=dis.lat,
+               longitude=dis.long)
+    }else
+    {
+      add.dis$latitude=dis.lat 
+      add.dis$longitude=dis.long
+    }
+    
+    NEWDATA=tidyr::crossing(NEWDATA, add.dis)
+    if(do.lm) Preds=predict(mod, newdata=NEWDATA, se.fit = TRUE,type = "response")
+    if(do.gam) Preds=predict.manyany(object=mod,newdata=NEWDATA,type="response", se.fit = TRUE)
     
     Preds.median=Preds$fit%>%data.frame()
     Preds.se=Preds$se.fit%>%data.frame()
     names(Preds.se)=names(Preds.median)
-    
     Preds.median=Preds.median%>%
-      mutate(year=NEWDATA$year)%>%
-      gather(species,Median,-year)
-    Preds.se=Preds.se%>%
-      mutate(year=NEWDATA$year)%>%
-      gather(species,SE,-year)
+      mutate(year=NEWDATA$year)
+    if(length(dis.lat)>1)
+    {
+      Preds.median=Preds.median%>%
+        mutate(latitude=NEWDATA$latitude,
+               longitude=NEWDATA$longitude)%>%  
+        gather(species,Median,-year,-latitude,-longitude)
+    }else
+    {
+      Preds.median=Preds.median%>%
+        gather(species,Median,-year)
+    }
     
+    Preds.se=Preds.se%>%
+      mutate(year=NEWDATA$year)
+    if(length(dis.lat)>1)
+    {
+      Preds.se=Preds.se%>%
+        mutate(latitude=NEWDATA$latitude,
+               longitude=NEWDATA$longitude)%>%  
+        gather(species,SE,-year,-latitude,-longitude)
+    }else
+    {
+      Preds.se=Preds.se%>%
+        gather(species,SE,-year)
+    }
+
     names(All.species.names)=tolower(names(All.species.names))
-    Preds=Preds.median%>%left_join(Preds.se,by=c('year','species'))%>%
+    if(length(dis.lat)>1)
+    {
+      Preds.year=Preds.median%>%left_join(Preds.se,by=c('year','species','latitude','longitude'))
+    }else
+    {
+      Preds.year=Preds.median%>%left_join(Preds.se,by=c('year','species'))
+    }
+    Preds.year=Preds.year%>%
+      mutate(lower95=Median-1.96*SE,
+             upper95=Median+1.96*SE,
+             species=str_remove(species, 'X'))%>%
+      left_join(All.species.names,by='species')
+    
+    #Predict latitude and longitude
+    NEWDATA=Terms.part%>%
+      mutate(latitude=round(latitude),
+             longitude=round(longitude))%>%
+      distinct(latitude,longitude)%>%
+      mutate(latitude=latitude-0.5,
+             longitude=longitude+0.5)
+    
+    add.dis1=Terms.part[,-match(c('latitude','longitude'),names(Terms.part))]
+    add.dis=add.dis1[1,]
+    for(o in 1:ncol(add.dis))
+    {
+      if(is.character(add.dis1[,o])|is.factor(add.dis1[,o])) sss=Mode(add.dis1[,o])
+      if(is.numeric(add.dis1[,o])) sss=mean(add.dis1[,o],na.rm=T)
+      add.dis[,o]=sss
+    }
+    suppressWarnings({NEWDATA=cbind(NEWDATA,add.dis)})
+    if(do.lm) Preds=predict(mod, newdata=NEWDATA, se.fit = TRUE,type = "response")
+    if(do.gam) Preds=predict.manyany(object=mod,newdata=NEWDATA,type="response", se.fit = TRUE)
+    
+    Preds.median=Preds$fit%>%data.frame()
+    Preds.se=Preds$se.fit%>%data.frame()
+    names(Preds.se)=names(Preds.median)
+    Preds.median=Preds.median%>%
+      mutate(longitude=NEWDATA$longitude,
+             latitude=NEWDATA$latitude)%>%
+      gather(species,Median,-longitude,-latitude)
+    Preds.se=Preds.se%>%
+      mutate(longitude=NEWDATA$longitude,
+             latitude=NEWDATA$latitude)%>%
+      gather(species,SE,-longitude,-latitude)
+    Preds.lat.lon=Preds.median%>%left_join(Preds.se,by=c('longitude','latitude','species'))%>%
       mutate(lower95=Median-1.96*SE,
              upper95=Median+1.96*SE,
              species=str_remove(species, 'X'))%>%
       left_join(All.species.names,by='species')
     
     
-     return(list(mod=mod,Preds=Preds))
+     return(list(mod=mod,Preds=Preds.year,Preds.lat.lon=Preds.lat.lon))
   }
   
-    #Permanova  
+    #2.2 Permanova  
   if(do.permanova)
   {
     # 2.1. overall significance test
-    adon.results<-adonis2(formula(paste('Community',term.form,sep='~')),data=d, method="bray",perm=1e3,parallel=6)
+    adon.results<-adonis2(formula(paste('Community',term.form.permanova,sep='~')),data=d, method="bray",perm=1e3,parallel=6)
     write.csv(as.data.frame(adon.results),paste(hndl,'/Permanova table_',dat.name,'.csv',sep=""))
     
     # 2.2. multilevel pairwise comparison with adjusted p-values
@@ -1824,7 +2325,7 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
     
   }
   
-    #Simper analysis to identify species that discriminate among groups
+    #2.3 Simper analysis to identify species that discriminate among groups
   if(do.simper)
   {
     SIMPER <- summary(simper(Community, d%>%pull(Show.term),parallel=7))
@@ -1896,14 +2397,123 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
   }
   
 }
-display.multivar.stats=function(mod)
+
+predict.manyany=function (object, newdata = NULL, type = c("link", "response","terms"), se.fit = FALSE,
+                          dispersion = NULL, terms = NULL, na.action = na.pass, ...) 
 {
-  # plot(mod)
-  #ANOVA=anova(mod) #overall anova
-  #summary(mod,nBoot=999,test=='LR')
-  #anova(mod, p.uni = "adjusted") #in which species there's a year effect?
+  object$family=object$family[[1]]
+  if (any(object$family == "gaussian")) {
+    if (type == "link") {
+      stop("Possible type of predict.manylm is 'response' or 'term'.")
+    }
+    else {
+      return(predict.manylm1(object, newdata = newdata, 
+                             se.fit = se.fit, type = type, terms = terms, 
+                             na.action = na.pass, ...))
+    }
+  }
+  nVar <- NCOL(object$fitted.values)
+  nObs <- NROW(object$fitted.values)
+  if (is.null(newdata) == F) 
+    nObs = NROW(newdata)
+  ses <- fts <- matrix(NA, nObs, nVar)
+  if (is.null(newdata)) 
+    dimnames(fts)[[1]] = dimnames(object$fitted.values)[[1]]
+  else dimnames(fts)[[1]] = rownames(newdata)
+  dimnames(fts)[[2]] = dimnames(object$fitted.values)[[2]]
+  type <- match.arg(type)
+  na.act <- object$na.action
+  object$na.action <- NULL
+  fm <- formula(object)
+  if ("K" %in% names(object$call)) {
+    K = eval(object$call$K)
+    if (K > 1 & object$family != "binomial") {
+      warning("Argument K should only be specified when family is binomial, K reset to 1")
+      K = 1
+    }
+  }
+  else K = 1
+  for (iVar in 1:nVar) {
+    fam = switch(object$family, `binomial(link=logit)` = binomial(), 
+                 `binomial(link=cloglog)` = binomial("cloglog"), 
+                 poisson = poisson(), gaussian = gaussian(), gamma = Gamma(link = "log"), 
+                 negative.binomial = negative.binomial(theta = object$theta[iVar]))
+    if (is.null(object$data)) 
+      dat.i = model.frame(object)
+    else dat.i = data.frame(object$y[, iVar], object$data)
+    if (K > 1) {
+      dat.i$K = K
+      form <- as.formula(paste("object$y[ ,", iVar, 
+                               "]/K ~ ", fm[3]))
+      object.i = glm(form, family = fam, data = dat.i, 
+                     weights = K, start = as.vector(object$coef[, 
+                                                                iVar]))
+      object.i$coefficients = coef(object)[, iVar]
+    }
+    else {
+      form <- as.formula(paste("object$y[ ,", iVar, 
+                               "] ~ ", fm[3]))
+      object.i = glm(form, family = fam, data = dat.i, 
+                     start = as.vector(object$coef[, iVar]))
+      object.i$coefficients = coef(object)[, iVar]
+    }
+    ft.i <- predict.glm(object.i, newdata = newdata, se.fit = se.fit, 
+                        type = type, terms = terms, na.action = na.action)
+    if (se.fit == T) {
+      fts[, iVar] = ft.i$fit
+      ses[, iVar] = ft.i$se
+    }
+    else fts[, iVar] = ft.i
+  }
+  if (se.fit) 
+    out = list(fit = fts, se.fit = ses)
+  else out = fts
+  return(out)
 }
 
+predict.manylm1=function (object, newdata = NULL, se.fit = FALSE, type = c("response", 
+                                                                           "terms"), terms = NULL, na.action = na.pass, ...) 
+{
+  if(!"y"%in%names(object))
+  {
+    object$y=object$model[,grepl(all.vars(formula(object))[1],names(object$model))]
+  }
+  
+  
+  nVar <- NCOL(object$fitted.values)
+  nObs <- NROW(object$fitted.values)
+  if (is.null(newdata) == F) 
+    nObs = NROW(newdata)
+  ses <- fts <- matrix(NA, nObs, nVar)
+  dimnames(fts) = vector(2, mode = "list")
+  dimnames(fts)[[2]] = dimnames(object$fitted.values)[[2]]
+  if (is.null(newdata)) 
+    dimnames(fts)[[1]] = dimnames(object$fitted.values)[[1]]
+  else dimnames(fts)[[1]] = rownames(newdata)
+  type <- match.arg(type)
+  na.act <- object$na.action
+  object$na.action <- NULL
+  fm <- formula(object)
+  for (iVar in 1:nVar)
+  {
+    form <- as.formula(paste("object$y[ ,", iVar, "] ~ ",fm[3]))
+    if (is.null(object$data)) 
+      dat.i = model.frame(object)
+    else dat.i = data.frame(object$y[, iVar], object$data)
+    object.i = gam(form, data = dat.i)
+    ft.i <- predict(object.i, newdata = newdata, se.fit = se.fit, 
+                    type = type, terms = terms, na.action = na.action)
+    if (se.fit == T) {
+      fts[, iVar] = ft.i$fit
+      ses[, iVar] = ft.i$se
+    }
+    else fts[, iVar] = ft.i
+  }
+  if (se.fit) 
+    out = list(fit = fts, se.fit = ses)
+  else out = fts
+  return(out)
+}
 
 #Catch composition thru time
 Catch.comp=function(ddd,All.sp,Display)
