@@ -25,6 +25,8 @@ library(statmod)
 require(tweedie)
 require(pairwiseAdonis)
 require(vegan)
+library(boral)  #HMSC package is another good alternative
+library(corrplot)
 
 #--FUNCTIONS---
 
@@ -666,7 +668,8 @@ fn.relative=function(D)
 }
 
 #Plot predictions
-fun.pred=function(d,Show.pred,normalised,PredictorS,log.var,MDL,BY=1)
+fun.pred=function(d,Show.pred,normalised,PredictorS,log.var,MDL,BY=1,
+                  add.dis.long.to.pred=FALSE,add.dis.lat.to.pred=FALSE)
 {
   #create new data
   Dat=d$data
@@ -722,6 +725,16 @@ fun.pred=function(d,Show.pred,normalised,PredictorS,log.var,MDL,BY=1)
   }
     
   set.seed(999);Pos.pars.rand=rmvnorm(niter,mean=Koef,sigma=Covar.pos)    
+  
+  if(any(!add.dis.long.to.pred==FALSE))
+  {
+    ddummi=vector('list',length(add.dis.long.to.pred))
+    for(kk in 1:length(ddummi))
+    {
+      ddummi[[kk]]=NEWDATA%>%mutate(LATITUDE=add.dis.lat.to.pred[kk],LONGITUDE=add.dis.long.to.pred[kk])
+    }
+    NEWDATA=do.call(rbind,ddummi)
+  }
   MC.preds=matrix(nrow=niter,ncol=length(NEWDATA[,match(Show.pred[1],names(NEWDATA))]))
   
   for(n in 1:niter)
@@ -769,6 +782,10 @@ fun.pred=function(d,Show.pred,normalised,PredictorS,log.var,MDL,BY=1)
     }
     dat.plt=dat.plt[order(dat.plt$yr),]
   }
+  
+  #add location
+  dat.plt=dat.plt%>%mutate(LATITUDE1=NEWDATA$LATITUDE, LONGITUDE1=NEWDATA$LONGITUDE)
+
   return(dat.plt)
 }
 
@@ -1508,7 +1525,15 @@ fn.apply.model=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,
   {
     Year=fun.pred(d=Store.mod.out[[i]],  
                   Show.pred="YEAR",
-                  normalised=normalised,
+                  normalised="NO",
+                  PredictorS=subset(Predictors,Predictors%in%idvarS),
+                  log.var=Res.var.in.log[i],
+                  MDL=MDL)        #add.dis.long.to.pred=Pred.long,
+                                    #add.dis.lat.to.pred=Pred.lat  
+    
+    Year.R=fun.pred(d=Store.mod.out[[i]],  
+                  Show.pred="YEAR",
+                  normalised="YES",
                   PredictorS=subset(Predictors,Predictors%in%idvarS),
                   log.var=Res.var.in.log[i],
                   MDL=MDL)
@@ -1529,7 +1554,10 @@ fn.apply.model=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,
                           MDL=MDL,
                           BY=0.5)    
         
-    aa=rbind(Year,Month,Lat.Long)
+    aa=rbind(Year%>%mutate(Relative='NO'),
+             Year.R%>%mutate(Relative='YES'),
+             Month%>%mutate(Relative=normalised),
+             Lat.Long%>%mutate(Relative=normalised))
     
     Store.preds[[i]]=aa%>%mutate(Indicator=resp.vars[i],
                                  LowCI=ifelse(LowCI<0,0,LowCI),
@@ -1538,6 +1566,51 @@ fn.apply.model=function(DaTA,dat.nm,normalised,Drop.yrs,idvarS,resp.vars,
   }
   
   return(do.call(rbind,Store.preds))
+}
+
+#Function for plotting predictions
+fn.plot.preds=function(d,scale.y.low=NULL,rotate.axis=FALSE,add.smoother=FALSE,YLAB,add.zone=FALSE)
+{
+  if(add.zone)
+  {
+    p=d%>%
+      ggplot(aes(Value,MeAn))+
+      geom_point(aes(color=Zone))+
+      geom_errorbar(aes(color=Zone,ymin = LowCI, ymax = UppCI))+
+      facet_wrap(~Indicator,scales='free_y',ncol=2)+
+      geom_line(aes(color=Zone),alpha=.6,linetype='dotted')+
+      theme_PA(strx.siz=10)+ylab(YLAB)+xlab('Year')+
+      theme(legend.position = 'top',
+            legend.title = element_blank())
+    
+    if(add.smoother)
+    {
+      p=p+
+        geom_smooth(method="auto", se=TRUE, fullrange=FALSE, level=0.95,alpha=0.35)+
+        geom_point(aes(color=Zone))
+    }
+      
+  }else
+  {
+    p=d%>%
+      ggplot(aes(Value,MeAn))+
+      geom_point()+
+      geom_errorbar(aes(ymin = LowCI, ymax = UppCI))+
+      facet_wrap(~Indicator,scales='free_y',ncol=2)+
+      geom_line(alpha=.6,linetype='dotted')+
+      theme_PA(strx.siz=10)+ylab(YLAB)+xlab('Year')
+    if(add.smoother)
+    {
+      p=p+
+        geom_smooth(method="auto", se=TRUE, fullrange=FALSE, level=0.95,alpha=0.35)+
+        geom_point()
+    }
+  }
+  if(!is.null(scale.y.low)) p=p+scale_y_continuous(limits = c(scale.y.low, NA))
+  if(rotate.axis) p=p+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+  
+  return(p)
 }
 
 #Function for anova commercial
@@ -2008,21 +2081,30 @@ residuals.manyany<- function(object, ...)
   resids=qnorm(resids)
   return(resids)
 }
-multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
-                         simper.cumsum=0.85,LGSIZE=12,
-                         All.species.names,
-                         dat.name,do.MDS=FALSE,do.pcoa=FALSE,
-                         do.permanova=FALSE,do.simper=FALSE,do.mvabund=TRUE,
-                         do.gam=FALSE,do.tweedie=FALSE,do.lm=TRUE,
-                         term.form.gam,term.form.permanova,use.Other=TRUE,group.ordination=FALSE,
-                         dis.lat,dis.long)
+multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,simper.cumsum=0.85,LGSIZE=12,
+                         All.species.names,dat.name,do.MDS=TRUE,do.pcoa=FALSE,
+                         group.ordination=TRUE,Group.term.ordination=c('year','latitude','longitude'),
+                         do.boral=FALSE,do.mvabund=TRUE,do.permanova=FALSE,do.simper=FALSE,
+                         do.gam=FALSE,do.tweedie=TRUE,do.lm=FALSE,aggregate.monthly=TRUE,
+                         term.form.model,term.form.permanova,use.Other=TRUE,dis.lat,dis.long,do.anova=FALSE)
 {
   names(d)=tolower(names(d))
+  
+  if(aggregate.monthly)
+  {
+    Terms=Group.term.ordination
+    d=d%>%
+      mutate(latitude=round(latitude),
+             longitude=round(longitude))%>%
+      group_by_at(c('species',Terms))%>%
+      summarise(individuals=mean(individuals,na.rm=T),
+                ktch=sum(individuals*effort,na.rm=T))
+  }
   
   #Define what species are grouped
   what.species=d%>%
     group_by_at(Def.sp.term)%>%
-    summarise(n=sum(individuals,na.rm=T))%>%
+    summarise(n=sum(ktch))%>%
     spread(year,n,fill=0)%>%
     ungroup()%>%data.frame
   what.species$n=rowSums(what.species[,-1])
@@ -2033,6 +2115,7 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
            Cumktch=cumsum(n),
            Cumktch=Cumktch/sum(n))
   
+  if(Group=='90') what.species=what.species%>%mutate(species2=ifelse(Cumktch<=0.9,species,'Other'))
   if(Group=='95') what.species=what.species%>%mutate(species2=ifelse(Cumktch<=0.95,species,'Other'))
   if(Group=='Top20') what.species=what.species%>%mutate(species2=ifelse(Row<=20,species,'Other'))
   what.species=what.species%>%
@@ -2052,10 +2135,14 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
   d=d%>%filter(ColSum<100)
   d=d%>%filter(!is.na(ColSum))
   d=d%>%filter(ColSum>0)
-  if(Transf=='proportion') d[-match(c(Terms,'ColSum'),names(d))]=d[-match(c(Terms,'ColSum'),names(d))]/d$ColSum
+
+  if(Transf=='proportion')
+  {
+    d[-match(c(Terms,'ColSum'),names(d))]=d[-match(c(Terms,'ColSum'),names(d))]/d$ColSum
+  }
+    
   d=d%>%
-    dplyr::select(-ColSum)%>%
-    data.frame%>%mutate(boat=factor(boat))
+    dplyr::select(-ColSum)
   
   dd = d[,-match(Terms,names(d))]
   drop.this=which(rowSums(dd)==0)
@@ -2071,26 +2158,47 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
     #1.1 MDS 
   if(do.MDS)
   {
-    MDS <- metaMDS(comm = Community, distance = "bray",k=2,trymax=100, trace = FALSE, autotransform = FALSE)
-    mds.envfit <- envfit(MDS, Terms.part, permutations = 999) # this fits environmental vectors
-    mds.spp.fit <- envfit(MDS, Community, permutations = 999) # this fits species vectors
+    Comm=Community
+    
+    if(group.ordination)
+    {
+      Comm <-cbind(Comm,d[,match(Group.term.ordination,names(d))])
+     if('latitude'%in%Group.term.ordination) 
+     {
+       Comm=Comm%>%
+         mutate(latitude=round(latitude),
+                longitude=round(longitude))
+     }
+      Comm=Comm%>%
+        group_by_at(Group.term.ordination)%>%
+        summarise_all("mean")
+      Terms.part.agg=Comm[,match(Group.term.ordination,names(Comm))]
+      Comm = Comm[,-match(Group.term.ordination,names(Comm))]
+    }
+    
+    MDS <- metaMDS(comm = Comm, distance = "bray",k=2,trymax=50, trace = T, autotransform = FALSE)
+    mds.envfit <- envfit(MDS, Terms.part.agg, permutations = 999) # this fits environmental vectors
+    mds.spp.fit <- envfit(MDS, Comm, permutations = 999) # this fits species vectors
     
     #create dataframes
     site.scrs <- as.data.frame(scores(MDS, display = "sites")) #save NMDS results into dataframe
-    site.scrs <- cbind(site.scrs,Terms.part) #add grouping variable "ecosystem" to dataframe
+    site.scrs <- cbind(site.scrs,Terms.part.agg) #add grouping variable "ecosystem" to dataframe
     
-    
-    #okay, plot it up
+    #plot it up
+    Kls=colfunc(length(levels(Terms.part.agg$year)))
+    names(Kls)=levels(Terms.part.agg$year)
     nmds <- site.scrs%>%
-            mutate(year=as.numeric(as.character(year)))%>%
             ggplot(aes(x=NMDS1, y=NMDS2,colour = year))+ #sets up the plot
-            geom_point(aes(NMDS1, NMDS2, colour = year),alpha = 0.4, size = 4)+ #adds site points to plot, shape determined by Landuse, colour determined by Management
+            #stat_ellipse(aes(x=NMDS1,y=NMDS2,colour=year),level = 0.50,linewidth=1.2)+
+            geom_point(aes(NMDS1, NMDS2, colour = year),alpha = 0.6, size = 4)+ #adds site points to plot, shape determined by Landuse, colour determined by Management
             coord_fixed()+
             annotate(geom="text", x=0.85*max(site.scrs$NMDS1,na.rm=T), y=min(site.scrs$NMDS2,na.rm=T), 
                      label=paste("Stress=",round(MDS$stress,3)))+
             theme_PA(leg.siz=14,axs.t.siz=12,axs.T.siz=14)+
-            theme(legend.title = element_blank())+
-            xlab('')+ylab('')
+            theme(legend.title = element_blank(),
+                  legend.position = 'top')+
+            xlab('')+ylab('')+
+            scale_color_manual(values=Kls)
     print(nmds)
     ggsave(paste(hndl,'/MDS_',dat.name,'.tiff',sep=""),width = 6,height = 6,compression = "lzw")
     
@@ -2143,10 +2251,75 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
     
   }
   
-  #2. Multi stats
-    #2.1 mvabund
+  #2. Multi stats 
+  NEWDATA=data.frame(unique(Terms.part[,Show.term]))
+  colnames(NEWDATA)=Show.term
+  add.dis1=Terms.part[,-match(Show.term,names(Terms.part))]%>%data.frame
+  add.dis=add.dis1[1,]
+  for(o in 1:ncol(add.dis))
+  {
+    if(is.character(add.dis1[,o])|is.factor(add.dis1[,o])) sss=Mode(add.dis1[,o])
+    if(is.numeric(add.dis1[,o])) sss=mean(add.dis1[,o],na.rm=T)
+    add.dis[,o]=sss
+  }
+  if(length(dis.lat)>1)
+  {
+    add.dis=rbind(add.dis, add.dis[rep(1, length(dis.lat)-1), ])%>%
+      mutate(latitude=dis.lat,
+             longitude=dis.long)
+  }else
+  {
+    add.dis$latitude=dis.lat 
+    add.dis$longitude=dis.long
+  }
+  NEWDATA=tidyr::crossing(NEWDATA, add.dis)
+  
+  
+  #2.1 boral   #takes 0.36 sec per row   #not working properly, cannot predict 'Newdata'
+  if(do.boral)
+  {
+    example_mcmc_control <- list(n.burnin = 10, n.iteration = 100, n.thin = 1)
+    testpath <- file.path(tempdir(), "jagsboralmodel.txt")
+    spp_mat <- as.matrix(Community)
+    
+    if(Transf=='proportion')
+    {
+      spp_mat[spp_mat == 0] <- 1e-4   #beta cannot take exact 0 or 1
+      spp_mat[spp_mat == 1] <- 0.99999
+      mod <- boral(spp_mat, X = Terms.part, formula.X = paste('~',term.form.model),
+                        family = "beta", lv.control = list(num.lv = 2),save.model = T,
+                        mcmc.control = example_mcmc_control,model.name = testpath)
+    }else
+    {
+      mod <- boral(spp_mat, X = Terms.part, formula.X = paste('~',term.form.model),
+                   family = "tweedie", lv.control = list(num.lv = 2),save.model = T, 
+                   mcmc.control = example_mcmc_control, model.name = testpath)
+      
+    }
+
+    #Predict year effect
+    Preds=predict(object=mod, predict.type = "conditional",scale = "response")
+    Preds=as.data.frame(Preds$linpred)
+    names(Preds)=colnames(spp_mat)
+    Preds=cbind(Terms.part,Preds)
+ 
+    a=Preds%>%
+      dplyr::select(colnames(spp_mat),year,latitude,longitude)%>%
+      gather(species,Median,-year,-latitude, -longitude)%>%
+      filter(latitude%in%dis.lat & longitude%in%dis.long)%>%
+      mutate(species=str_remove(species, 'X'),
+             latitude=round(latitude),
+             longitude=round(longitude))%>%
+      group_by(year,latitude,longitude,species)%>%
+      summarise(Median=mean(Median))
+
+    return(list(Preds=Preds))
+  }
+    #2.2 mvabund
   if(do.mvabund)
   {
+    names(All.species.names)=tolower(names(All.species.names))
+    
     spp_mat <- mvabund(as.matrix(Community))
     
     explore.dis=FALSE
@@ -2173,49 +2346,58 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
         facet_wrap(~species,scales='free_y')
     }
     
-    
+    null.mod=NULL
     if(do.gam) 
     {
-       mod <- manyany.fixed(formula=formula(paste('spp_mat',term.form.gam,sep='~')),fn='gam',    
+       mod <- manyany.fixed(formula=formula(paste('spp_mat',term.form.model,sep='~')),fn='gam',    
                       family = gaussian(link = "identity"),data=Terms.part)
-      #mod <- manyany.fixed(formula=formula(paste('spp_mat',term.form.gam,sep='~')),fn='gam',    
+      #mod <- manyany.fixed(formula=formula(paste('spp_mat',term.form.model,sep='~')),fn='gam',    #doesn't work
       #                      family = betar(link="logit"),data=Terms.part)
+       null.mod<-manyany.fixed(formula=spp_mat ~1,fn='gam',    
+                              family = gaussian(link = "identity"),data=Terms.part)
     }
-    if(do.tweedie) #predictions don't work but yields same coefs as lm
+    if(do.tweedie) 
     {
-       mod <- manyany(spp_mat~year+ month+ latitude* longitude,fn="glm",data=Terms.part,
-                      family=tweedie(var.power=1.2, link.power=0), var.power=1.2)  
-      
+       mod <- manyany(formula=formula(paste('spp_mat',term.form.model,sep='~')),fn="glm",data=Terms.part, 
+                      family=tweedie(var.power=1.2, link.power=0), var.power=1.2) 
+       
+       if(do.anova)
+       {
+         null.mod<-manyany(formula=formula(paste('spp_mat',1,sep='~')),fn="glm",data=Terms.part,
+                           family=tweedie(var.power=1.2, link.power=0), var.power=1.2)
+         
+         mod.alt<-manyany(formula=formula(spp_mat ~ year),fn="glm",data=Terms.part, 
+                          family=tweedie(var.power=1.2, link.power=0), var.power=1.2)
+         a=anova(null.mod, mod.alt, p.uni = "unadjusted", nBoot = 99)   
+         anovt=data.frame(species=names(a[[4]]),LR=c(a[[3]]),p=a[[4]])%>%
+           left_join(All.species.names,by='species')%>%filter(!species=='Other')%>%
+           relocate(scientific_name)%>%dplyr::select(-species)%>%
+           mutate(p=ifelse(p==0.01,'<0.01',p))
+         write.csv(anovt, paste0(hndl,"/Anova_year_",dat.name,".csv"),row.names=F)
+         
+         mod.alt<-manyany(formula=formula(spp_mat ~ latitude * longitude),fn="glm",data=Terms.part, 
+                          family=tweedie(var.power=1.2, link.power=0), var.power=1.2)
+         a=anova(null.mod, mod.alt, p.uni = "unadjusted", nBoot = 99)
+         anovt=data.frame(species=names(a[[4]]),LR=c(a[[3]]),p=a[[4]])%>%
+           left_join(All.species.names,by='species')%>%filter(!species=='Other')%>%
+           relocate(scientific_name)%>%dplyr::select(-species)%>%
+           mutate(p=ifelse(p==0.01,'<0.01',p))
+         write.csv(anovt, paste0(hndl,"/Anova_lat.long_",dat.name,".csv"),row.names=F)
+         
+         rm(a)
+       }
+
     }
     if(do.lm)
     {
-      mod <- manylm(formula=formula(paste('spp_mat',term.form.gam,sep='~')),data=Terms.part)
+      spp_mat.log=log(spp_mat+1e-6)
+      mod <- manylm(formula=formula(paste('spp_mat.log',term.form.model,sep='~')),data=Terms.part)  
     }
     
-    #Predict year effect for Albany
-    NEWDATA=data.frame(unique(Terms.part[,Show.term]))
-    colnames(NEWDATA)=Show.term
-    add.dis1=Terms.part[,-match(Show.term,names(Terms.part))]
-    add.dis=add.dis1[1,]
-    for(o in 1:ncol(add.dis))
-    {
-      if(is.character(add.dis1[,o])|is.factor(add.dis1[,o])) sss=Mode(add.dis1[,o])
-      if(is.numeric(add.dis1[,o])) sss=mean(add.dis1[,o],na.rm=T)
-      add.dis[,o]=sss
-    }
-    if(length(dis.lat)>1)
-    {
-      add.dis=rbind(add.dis, add.dis[rep(1, length(dis.lat)-1), ])%>%
-        mutate(latitude=dis.lat,
-               longitude=dis.long)
-    }else
-    {
-      add.dis$latitude=dis.lat 
-      add.dis$longitude=dis.long
-    }
     
-    NEWDATA=tidyr::crossing(NEWDATA, add.dis)
-    if(do.lm) Preds=predict(mod, newdata=NEWDATA, se.fit = TRUE,type = "response")
+    #Predict year effect 
+    if(do.lm) Preds=predict(object=mod, newdata=NEWDATA, se.fit = TRUE,type = "response")
+    if(do.tweedie) Preds=predict.manyglmTweedie(object=mod, newdata=NEWDATA, se.fit = TRUE,type = "response")
     if(do.gam) Preds=predict.manyany(object=mod,newdata=NEWDATA,type="response", se.fit = TRUE)
     
     Preds.median=Preds$fit%>%data.frame()
@@ -2249,7 +2431,7 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
         gather(species,SE,-year)
     }
 
-    names(All.species.names)=tolower(names(All.species.names))
+    
     if(length(dis.lat)>1)
     {
       Preds.year=Preds.median%>%left_join(Preds.se,by=c('year','species','latitude','longitude'))
@@ -2264,47 +2446,53 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
       left_join(All.species.names,by='species')
     
     #Predict latitude and longitude
-    NEWDATA=Terms.part%>%
-      mutate(latitude=round(latitude),
-             longitude=round(longitude))%>%
-      distinct(latitude,longitude)%>%
-      mutate(latitude=latitude-0.5,
-             longitude=longitude+0.5)
-    
-    add.dis1=Terms.part[,-match(c('latitude','longitude'),names(Terms.part))]
-    add.dis=add.dis1[1,]
-    for(o in 1:ncol(add.dis))
+    Preds.lat.lon=NULL
+    do.dis=FALSE
+    if(do.dis)
     {
-      if(is.character(add.dis1[,o])|is.factor(add.dis1[,o])) sss=Mode(add.dis1[,o])
-      if(is.numeric(add.dis1[,o])) sss=mean(add.dis1[,o],na.rm=T)
-      add.dis[,o]=sss
+      NEWDATA=Terms.part%>%
+        mutate(latitude=round(latitude),
+               longitude=round(longitude))%>%
+        distinct(latitude,longitude)%>%
+        mutate(latitude=latitude-0.5,
+               longitude=longitude+0.5)
+      
+      add.dis1=Terms.part[,-match(c('latitude','longitude'),names(Terms.part))]
+      add.dis=add.dis1[1,]
+      for(o in 1:ncol(add.dis))
+      {
+        if(is.character(add.dis1[,o])|is.factor(add.dis1[,o])) sss=Mode(add.dis1[,o])
+        if(is.numeric(add.dis1[,o])) sss=mean(add.dis1[,o],na.rm=T)
+        add.dis[,o]=sss
+      }
+      suppressWarnings({NEWDATA=cbind(NEWDATA,add.dis)})
+      if(do.lm) Preds=predict(mod, newdata=NEWDATA, se.fit = TRUE,type = "response")
+      if(do.gam) Preds=predict.manyany(object=mod,newdata=NEWDATA,type="response", se.fit = TRUE)
+      
+      Preds.median=Preds$fit%>%data.frame()
+      Preds.se=Preds$se.fit%>%data.frame()
+      names(Preds.se)=names(Preds.median)
+      Preds.median=Preds.median%>%
+        mutate(longitude=NEWDATA$longitude,
+               latitude=NEWDATA$latitude)%>%
+        gather(species,Median,-longitude,-latitude)
+      Preds.se=Preds.se%>%
+        mutate(longitude=NEWDATA$longitude,
+               latitude=NEWDATA$latitude)%>%
+        gather(species,SE,-longitude,-latitude)
+      Preds.lat.lon=Preds.median%>%left_join(Preds.se,by=c('longitude','latitude','species'))%>%
+        mutate(lower95=Median-1.96*SE,
+               upper95=Median+1.96*SE,
+               species=str_remove(species, 'X'))%>%
+        left_join(All.species.names,by='species')
+      
     }
-    suppressWarnings({NEWDATA=cbind(NEWDATA,add.dis)})
-    if(do.lm) Preds=predict(mod, newdata=NEWDATA, se.fit = TRUE,type = "response")
-    if(do.gam) Preds=predict.manyany(object=mod,newdata=NEWDATA,type="response", se.fit = TRUE)
+      
     
-    Preds.median=Preds$fit%>%data.frame()
-    Preds.se=Preds$se.fit%>%data.frame()
-    names(Preds.se)=names(Preds.median)
-    Preds.median=Preds.median%>%
-      mutate(longitude=NEWDATA$longitude,
-             latitude=NEWDATA$latitude)%>%
-      gather(species,Median,-longitude,-latitude)
-    Preds.se=Preds.se%>%
-      mutate(longitude=NEWDATA$longitude,
-             latitude=NEWDATA$latitude)%>%
-      gather(species,SE,-longitude,-latitude)
-    Preds.lat.lon=Preds.median%>%left_join(Preds.se,by=c('longitude','latitude','species'))%>%
-      mutate(lower95=Median-1.96*SE,
-             upper95=Median+1.96*SE,
-             species=str_remove(species, 'X'))%>%
-      left_join(All.species.names,by='species')
-    
-    
-     return(list(mod=mod,Preds=Preds.year,Preds.lat.lon=Preds.lat.lon))
+     return(list(null.mod=null.mod,mod=mod,Preds=Preds.year,Preds.lat.lon=Preds.lat.lon))
   }
   
-    #2.2 Permanova  
+    #2.3 Permanova  
   if(do.permanova)
   {
     # 2.1. overall significance test
@@ -2312,20 +2500,24 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,
     write.csv(as.data.frame(adon.results),paste(hndl,'/Permanova table_',dat.name,'.csv',sep=""))
     
     # 2.2. multilevel pairwise comparison with adjusted p-values
-    #adonis.pairwise=pairwise.adonis(Community,d[,match(Show.term,names(d))])
-    dummy=pairwise.adonis2(Community~year,data=d)
-    adonis.pairwise=vector('list',(length(dummy)-1))
-    for(qq in 2:length(dummy))
-    {
-      adonis.pairwise[[qq]]=data.frame(Pairs=names(dummy)[[qq]],
-                                       P=dummy[[qq]]$`Pr(>F)`[1])
-    }
-    adonis.pairwise=do.call(rbind,adonis.pairwise)
-    write.csv(adonis.pairwise,paste(hndl,'/Permanova table_pairwise_',dat.name,'.csv',sep=""),row.names = F)
-    
+   do.this=TRUE
+   if(do.this)
+   {
+     dummy=pairwise.adonis2(Community~year,data=d)
+     adonis.pairwise=vector('list',(length(dummy)-1))
+     for(qq in 2:length(dummy))
+     {
+       adonis.pairwise[[qq]]=data.frame(Pairs=names(dummy)[[qq]],
+                                        P=dummy[[qq]]$`Pr(>F)`[1])
+     }
+     adonis.pairwise=do.call(rbind,adonis.pairwise)
+     write.csv(adonis.pairwise,paste(hndl,'/Permanova table_pairwise_',dat.name,'.csv',sep=""),row.names = F)
+     
+   }
+     
   }
   
-    #2.3 Simper analysis to identify species that discriminate among groups
+    #2.4 Simper analysis to identify species that discriminate among groups
   if(do.simper)
   {
     SIMPER <- summary(simper(Community, d%>%pull(Show.term),parallel=7))
@@ -2470,9 +2662,89 @@ predict.manyany=function (object, newdata = NULL, type = c("link", "response","t
   else out = fts
   return(out)
 }
-
-predict.manylm1=function (object, newdata = NULL, se.fit = FALSE, type = c("response", 
-                                                                           "terms"), terms = NULL, na.action = na.pass, ...) 
+predict.manyglmTweedie=function (object, newdata = NULL, type = c("link", "response", "terms"),
+                                 se.fit = FALSE, dispersion = NULL, terms = NULL, na.action = na.pass, ...) 
+{
+  nVar <- NCOL(object$fitted.values)
+  nObs <- NROW(object$fitted.values)
+  if (is.null(newdata) == F) nObs = NROW(newdata)
+  ses <- fts <- matrix(NA, nObs, nVar)
+  if (is.null(newdata)) 
+  {
+    dimnames(fts)[[1]] = dimnames(object$fitted.values)[[1]]
+  }else
+  {
+    dimnames(fts)[[1]] = rownames(newdata)
+  }
+  dimnames(fts)[[2]] = dimnames(object$fitted.values)[[2]]
+  type <- match.arg(type)
+  na.act <- object$na.action
+  object$na.action <- NULL
+  fm <- formula(object)
+  if ("K" %in% names(object$call))
+  {
+    K = eval(object$call$K)
+    if (K > 1 & object$family != "binomial") {
+      warning("Argument K should only be specified when family is binomial, K reset to 1")
+      K = 1
+    }
+  }else
+  {
+    K = 1
+  }
+   
+  for (iVar in 1:nVar)
+  {
+    # fam = switch(object$family[[iVar]]$family,
+    #               `binomial(link=logit)` = binomial(), 
+    #               `binomial(link=cloglog)` = binomial("cloglog"), 
+    #               poisson = poisson(),
+    #               gaussian = gaussian(),
+    #               gamma = Gamma(link = "log"),
+    #               'Tweedie' = tweedie(var.power=1.2, link.power=0),
+    #               negative.binomial = negative.binomial(theta = object$theta[iVar]))
+    if (is.null(object$data)) 
+    {
+      dat.i = model.frame(object)%>%
+        data.frame()%>%dplyr::select(all_of(Terms))
+    }else
+    {
+      dat.i = data.frame(object$y[, iVar], object$data)
+    }
+    
+    if(K > 1)
+    {
+      dat.i$K = K
+      form <- as.formula(paste("object$fitted.values[ ,", iVar, 
+                               "]/K ~ ", fm[3]))
+      object.i = glm(form, family = fam, data = dat.i, 
+                     weights = K, start = as.vector(object$coef[,iVar]))
+      object.i$coefficients = coef(object)[iVar]
+    }else
+    {
+      dd=dat.i%>%mutate(Response=object$fitted.values[, iVar])
+      object.i = glm(paste("Response ~ ", fm[3]), family = tweedie(var.power=1.2, link.power=0), data = dd,
+                     start = as.vector(object$coef[[iVar]]))
+                     #start = as.vector(object$coef[,iVar]))
+      object.i$coefficients = coef(object)[[iVar]]
+    }
+    
+    ft.i <- predict.glm(object.i, newdata = newdata, se.fit = se.fit, type = type, terms = terms)
+    if (se.fit == T)
+    {
+      fts[, iVar] = ft.i$fit
+      ses[, iVar] = ft.i$se
+    }
+    else fts[, iVar] = ft.i
+  }
+  
+  if (se.fit) 
+    out = list(fit = fts, se.fit = ses)
+  else out = fts
+  return(out)
+}
+predict.manylm1=function (object, newdata = NULL, se.fit = FALSE, type = c("response","terms"),
+                          terms = NULL, na.action = na.pass, ...) 
 {
   if(!"y"%in%names(object))
   {
