@@ -2369,7 +2369,7 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,simper.
          mod.alt<-manyany(formula=formula(spp_mat ~ year),fn="glm",data=Terms.part, 
                           family=tweedie(var.power=1.2, link.power=0), var.power=1.2)
          a=anova(null.mod, mod.alt, p.uni = "unadjusted", nBoot = 99)   
-         anovt=data.frame(species=names(a[[4]]),LR=c(a[[3]]),p=a[[4]])%>%
+         anovt=data.frame(species=str_remove(names(a[[4]]), 'X'),LR=c(a[[3]]),p=a[[4]])%>%  #ACA
            left_join(All.species.names,by='species')%>%filter(!species=='Other')%>%
            relocate(scientific_name)%>%dplyr::select(-species)%>%
            mutate(p=ifelse(p==0.01,'<0.01',p))
@@ -2378,7 +2378,7 @@ multivariate.fn=function(d,Terms,Def.sp.term,Transf,Show.term,Group,hndl,simper.
          mod.alt<-manyany(formula=formula(spp_mat ~ latitude * longitude),fn="glm",data=Terms.part, 
                           family=tweedie(var.power=1.2, link.power=0), var.power=1.2)
          a=anova(null.mod, mod.alt, p.uni = "unadjusted", nBoot = 99)
-         anovt=data.frame(species=names(a[[4]]),LR=c(a[[3]]),p=a[[4]])%>%
+         anovt=data.frame(species=str_remove(names(a[[4]]), 'X'),LR=c(a[[3]]),p=a[[4]])%>%
            left_join(All.species.names,by='species')%>%filter(!species=='Other')%>%
            relocate(scientific_name)%>%dplyr::select(-species)%>%
            mutate(p=ifelse(p==0.01,'<0.01',p))

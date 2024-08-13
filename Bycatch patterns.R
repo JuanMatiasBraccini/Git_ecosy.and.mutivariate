@@ -1372,7 +1372,10 @@ if(do.multivariate)
   Grouping.vars=c('sheet_no','YEAR','MONTH','LATITUDE','LONGITUDE','BOAT')
   if(do.Gam) TERM.form.g='year+s(month, k = 12, bs = "cc")+ s(boat, bs = "re")+s(latitude, longitude)'
   if(do.Lm) TERM.form.g=TERM.form.perm='year+latitude*longitude'
-  
+  Group.term.ord=labels(terms(formula(paste('y',TERM.form.g,sep='~'))))
+  if(do.Gam) this=grep("s",Group.term.ord)
+  if(do.Lm) this=grep(':',Group.term.ord)
+  if(length(this)>0) Group.term.ord=Group.term.ord[-this]
   tic()
   for(l in 1:length(Store.out.multi))   
   {
@@ -1395,7 +1398,7 @@ if(do.multivariate)
                                          do.MDS=TRUE,do.pcoa=FALSE, do.gam=FALSE, do.tweedie=TRUE, do.lm=FALSE,
                                          do.boral=FALSE, do.mvabund=TRUE, do.permanova=FALSE, do.simper=FALSE,
                                          group.ordination=TRUE,aggregate.monthly=TRUE,
-                                         Group.term.ordination=c('year','latitude','longitude'),
+                                         Group.term.ordination=Group.term.ord,
                                          term.form.model=TERM.form.g,
                                          term.form.permanova=TERM.form.perm,
                                          use.Other=TRUE,
@@ -1533,6 +1536,7 @@ if(do.multivariate)
 # 6. Display.catch.effort -----------------------------------------------------------------------
 if(display.catch.effort)
 {
+  library(rgdal)
   Dat.repository=handl_OneDrive('Analyses/Data_outs/')  #locations where all data are stored
   fn.in=function(NM) fread(paste(Dat.repository,NM,sep=""),data.table=FALSE)
   #TDGDLF
@@ -1794,6 +1798,40 @@ if(display.catch.effort)
                           pp), ncol=1,heights = c(1.3,.7))
   ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/Catch and effort.tiff"),
          width = 7,height = 11.5,compression = "lzw")
+  
+  #TDGDLF only
+  p6=N.shots%>% 
+    mutate(Longitude=LONGITUDE,
+           Latitude=abs(LATITUDE))%>%
+    ggplot()+
+    geom_polygon(data=WAcoast,aes(x=Longitude,y=Latitude),fill="grey90")+
+    geom_polygon(data=zone.west,aes(x=X1,y=X2),fill="#F8766D")+
+    geom_polygon(data=zone.zone1,aes(x=X1,y=X2),fill="#00BA38")+
+    geom_polygon(data=zone.zone2,aes(x=X1,y=X2),fill="#619CFF")+
+    theme_PA(leg.siz=7,axs.t.siz=10,axs.T.siz=14,Sbt.siz=14,strx.siz=11)+
+    theme(plot.title.position = "plot")+
+    ylab(expression('Latitude ('*~degree*S*')'))+
+    xlab(expression('Longitude ('*~degree*E*')'))+
+    scale_y_reverse()+xlim(Min.x,130)+
+    ggtitle('TDGDLF')
+  
+  pp1=ggarrange(plotlist=list(p4+theme(axis.text = element_text(size = 9))+rremove("xlab"),
+                              p3+theme(axis.text = element_text(size = 9))+rremove("xlab")),
+                common.legend = TRUE,ncol=2)
+  pp1=annotate_figure(pp1, bottom = textGrob("Financial year", gp = gpar(cex = 1.3)))
+  
+  
+  pp2=ggarrange(plotlist=list(p6,pp1),common.legend = TRUE,ncol=2,widths = c(0.5,1))
+  
+  ggarrange(plotlist=list(pp2,
+                          p1+
+                            facet_wrap(~Rango,ncol=3)+theme(legend.position = c(0.90, 0.825))+ggtitle('')+
+                             ylab(expression('Latitude ('*~degree*S*')'))+
+                             xlab(expression('Longitude ('*~degree*E*')'))),
+                    ncol=1, heights = c(.7,1.3))
+  
+  ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/Catch and effort_logbook.tiff"),
+         width = 7,height = 8,compression = "lzw")
    
 }
 
