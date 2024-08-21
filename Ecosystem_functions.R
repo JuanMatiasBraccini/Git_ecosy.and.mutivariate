@@ -1015,7 +1015,7 @@ fn.viol.box=function(d,byzone,filcol=NULL,resp.vars)
 }
 
 #Function for calculating ecological indicators
-fn.calc.ecol.ind=function(DaTA,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1)
+fn.calc.ecol.ind=function(DaTA,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1,check.each.fun.rich.var=TRUE)
 {
     #Define years to use
     if(Drop.yrs=="YES")DaTA=subset(DaTA,!YEAR%in%as.character(1993:1999))
@@ -1170,34 +1170,36 @@ fn.calc.ecol.ind=function(DaTA,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1)
       row.names(traits_sp)=traits_sp$SPECIES
       traits_sp=traits_sp%>%    
         dplyr::select(-SPECIES)
-      #convert to all numeric (needed for fd_fric from fundiversity package)
-      needed=FALSE
+      
+      needed=FALSE #convert to all numeric (needed for fd_fric from fundiversity package)
       if(needed)
-      {      gg=colnames(traits_sp)
-      for(g in 1:length(gg))
       {
-        if(!is.numeric(traits_sp[,g]))
+        gg=colnames(traits_sp)
+        for(g in 1:length(gg))
         {
-          UU=traits_sp[,g]
-          U=unique(UU)  
-          Riplase=data.frame(U,1:length(U))
-          Nm=colnames(traits_sp)[g]
-          names(Riplase)=c(Nm,'Rep')
-          UU=data.frame(UU)
-          names(UU)=Nm
-          UU=UU%>%left_join(Riplase,by=Nm)
-          traits_sp[,g]=UU$Rep
+          if(!is.numeric(traits_sp[,g]))
+          {
+            UU=traits_sp[,g]
+            U=unique(UU)  
+            Riplase=data.frame(U,1:length(U))
+            Nm=colnames(traits_sp)[g]
+            names(Riplase)=c(Nm,'Rep')
+            UU=data.frame(UU)
+            names(UU)=Nm
+            UU=UU%>%left_join(Riplase,by=Nm)
+            traits_sp[,g]=UU$Rep
+          }
         }
+        traits_sp=traits_sp%>%  
+          as.matrix()
       }
-      traits_sp=traits_sp%>%  
-        as.matrix()}
 
       #abundance data set
       site_sp=Dat.y[,-match(DrOp,names(Dat.y))]
       site_sp=as.matrix(site_sp)
       rownames(site_sp)=paste('Site',1:nrow(site_sp))
       
-      #use only species accounting for 95% of catch as very rare species stuff up calculations
+      #use only species accounting for 99% of catch as very rare species stuff up calculations
       CumS=rev(sort(colSums(site_sp)))
       CumS1=cumsum(CumS/sum(CumS))
       dis.sp=names(which(CumS1<0.99))
@@ -1208,7 +1210,7 @@ fn.calc.ecol.ind=function(DaTA,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1)
       
       #calculate functional diversity
       for(g in 1:ncol(traits_sp1)) if(!is.numeric(traits_sp1[,g])) traits_sp1[,g]=as.factor(traits_sp1[,g])
-      system.time({ex1 <- dbFD(traits_sp1, site_sp1)}) 
+      ex1 <- dbFD(traits_sp1, site_sp1) 
       Dat$FnRich_ecol=ex1$FRic
       
       #Add to data set  
@@ -1227,8 +1229,8 @@ fn.calc.ecol.ind=function(DaTA,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1)
       row.names(traits_sp)=traits_sp$SPECIES
       traits_sp=traits_sp%>%    
         dplyr::select(-SPECIES)
-      #convert to all numeric (needed for fd_fric from fundiversity package)
-      needed=FALSE
+      
+      needed=FALSE  #convert to all numeric (needed for fd_fric from fundiversity package)
       if(needed)
       {      gg=colnames(traits_sp)
       for(g in 1:length(gg))
@@ -1272,7 +1274,7 @@ fn.calc.ecol.ind=function(DaTA,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1)
       
       #calculate functional diversity
       for(g in 1:ncol(traits_sp1)) if(!is.numeric(traits_sp1[,g])) traits_sp1[,g]=as.factor(traits_sp1[,g])
-      system.time({ex1 <- dbFD(traits_sp1, site_sp1)}) 
+      ex1 <- dbFD(traits_sp1, site_sp1) 
       dummy=Dat
       if(length(id)>0)dummy=dummy[-id,]
       dummy$FnRich_morph=ex1$FRic
@@ -1280,6 +1282,44 @@ fn.calc.ecol.ind=function(DaTA,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1)
       #Add to data set  
       DATA.shots.diversity=DATA.shots.diversity%>%left_join(dummy%>%dplyr::select(SHEET_NO,FnRich_morph),by=c("SHEET_NO"))
       #DATA.shots.diversity=subset(DATA.shots.diversity,!is.na(FnRich_morph))
+    }
+    
+    if(check.each.fun.rich.var)
+    {
+      fun.rich.vars=DaTA%>%
+        dplyr::select( all_of(c('SHEET_NO','SPECIES',traits_ecol,traits_morph)))%>%
+        filter(SPECIES%in%colnames(site_sp1))
+      
+      #categorical to numeric
+      gg=colnames(fun.rich.vars)
+      for(g in 3:length(gg))
+      {
+        if(!is.numeric(fun.rich.vars[,g]))
+        {
+          UU=fun.rich.vars[,g]
+          U=unique(UU)  
+          Riplase=data.frame(U,1:length(U))
+          Nm=colnames(fun.rich.vars)[g]
+          names(Riplase)=c(Nm,'Rep')
+          UU=data.frame(UU)
+          names(UU)=Nm
+          UU=UU%>%left_join(Riplase,by=Nm)
+          fun.rich.vars[,g]=UU$Rep
+        }
+      }
+      
+      fun.rich.vars=fun.rich.vars%>%
+        distinct(SHEET_NO,SPECIES,.keep_all = T)%>%
+        left_join(Numbers,by=c("SHEET_NO","SPECIES"))
+      
+      fun.rich.vars=fun.rich.vars%>%
+        dplyr::select(-SPECIES)%>%
+        group_by(SHEET_NO)%>%
+        summarise(across(everything(), ~weighted.mean(., w=INDIVIDUALS, na.rm=TRUE)))%>%
+        dplyr::select(-INDIVIDUALS)
+      
+      DATA.shots.diversity=merge(DATA.shots.diversity,fun.rich.vars,by=c("SHEET_NO"),all.x=T)
+      
     }
     
     #Remove boats with less than Min.recs

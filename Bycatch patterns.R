@@ -773,6 +773,12 @@ for(l in 1:length(Data.list))
              SCIENTIFIC_NAME=str_remove(SCIENTIFIC_NAME, '\\.'))
  }
 
+#fix dodgy body shape
+for(l in 1:length(Data.list))
+{
+  Data.list[[l]]=Data.list[[l]]%>%mutate(Body.shape=ifelse(Body.shape=="\tfusiform / normal","fusiform / normal",Body.shape))
+}
+
 #Get list of species by group
 All.sp=vector('list',length(Data.list))
 for(l in 1:length(All.sp))
@@ -798,6 +804,24 @@ for(l in 1:length(All.sp))
 All.sp=do.call(rbind,All.sp)%>%
   distinct(SCIENTIFIC_NAME,Group)%>%arrange(Group,SCIENTIFIC_NAME)
 
+#Export traits
+a=Data.list$Logbook%>%distinct(SCIENTIFIC_NAME,
+                               Body.shape,Maximum.size,tmax,Body.depth,Head.length,Eye.diameter,Pre.orbital.length,
+                               Movement.scale,Feeding.group,TROPHIC_LEVEL,Habitat)%>%
+  mutate(SCIENTIFIC_NAME=str_replace(SCIENTIFIC_NAME,'spp','spp.'),
+         SCIENTIFIC_NAME=case_when(SCIENTIFIC_NAME=='Platycephalus laevigatus'~'Platycephalidae',
+                                   SCIENTIFIC_NAME%in%c('Epinephelus daemelii','Epinephelus ergastularius')~'Epinephelus spp.',
+                                   SCIENTIFIC_NAME=='Rhinobatidae'~'Rhinobatidae & Rhynchobatidae',
+                                   TRUE~SCIENTIFIC_NAME))%>%
+  distinct(SCIENTIFIC_NAME,.keep_all = T)
+xx=read.csv(handl_OneDrive('Data/Species.code.csv'))%>%dplyr::select(COMMON_NAME,SCIENTIFIC_NAME)%>%
+  mutate(SCIENTIFIC_NAME=str_remove(SCIENTIFIC_NAME,'Family '),
+         SCIENTIFIC_NAME=str_remove(SCIENTIFIC_NAME,'Families '))%>%
+  filter(SCIENTIFIC_NAME%in%a$SCIENTIFIC_NAME)%>%
+  distinct(SCIENTIFIC_NAME,.keep_all = T)
+a=a%>%left_join(xx,by='SCIENTIFIC_NAME')%>%
+  relocate(COMMON_NAME,SCIENTIFIC_NAME)
+write.csv(a,'Table functional diversity traits_logbook.csv',row.names = F)
 
   #3.6. Display raw species composition as proportions
 setwd(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs"))
@@ -928,7 +952,8 @@ Resp.vars_logbook=c(Ecol.Indicators%>%subset(Ecol.Indicators%in%c("Shannon","Pie
 
 Store.data.list=vector('list',length(Data.list))
 names(Store.data.list)=names(Data.list)
-for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
+Check.each.fun.rich=FALSE
+for(l in 1:length(Data.list))  #takes 13 minutes for observer and logbook data sets
 {
   print(paste("Ecosystems indicators calculation for -----------",names(Data.list)[l]))
   
@@ -1022,7 +1047,8 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
     mtext("Trophic level",2,2.5,cex=1.5,las=3)
     mtext("Year",1,2,cex=1.5)
     dev.off()
-  }
+
+   }
   
 
   #2. Calculate ecological and functional indicators
@@ -1045,7 +1071,8 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
                                  normalised="YES",
                                  Drop.yrs="NO",
                                  idvarS=idvarS,  
-                                 resp.vars=resp.vars)
+                                 resp.vars=resp.vars,
+                                 check.each.fun.rich.var=Check.each.fun.rich)
   if(check.discards & grepl("Observer",names(Data.list)[l]))
   {
     OUT.base.case.retained=fn.calc.ecol.ind(DaTA=ddd%>%filter(FATE=='C'),
@@ -1053,18 +1080,70 @@ for(l in 1:length(Data.list))  #takes 15 minutes for the three data sets
                                             normalised="YES",
                                             Drop.yrs="NO",
                                             idvarS=idvarS,
-                                            resp.vars=subset(resp.vars,!resp.vars=="Prop.Disc"))
+                                            resp.vars=subset(resp.vars,!resp.vars=="Prop.Disc"),
+                                            check.each.fun.rich.var=FALSE)
     OUT.base.case.discarded=fn.calc.ecol.ind(DaTA=ddd%>%filter(FATE=='D'),
                                             dat.nm="BC",
                                             normalised="YES",
                                             Drop.yrs="NO",
                                             idvarS=idvarS,
-                                            resp.vars=subset(resp.vars,!resp.vars=="Prop.Disc"))
+                                            resp.vars=subset(resp.vars,!resp.vars=="Prop.Disc"),
+                                            check.each.fun.rich.var=FALSE)
   }
   
   #Exploratory analyses 
   if(do.exploratory=="YES")
   {
+    #Show species composition and MTL  
+      a=Data.list[[l]]
+      
+      SORT=a%>%distinct(SCIENTIFIC_NAME,.keep_all = T)%>%arrange(NATURE)%>%pull(SCIENTIFIC_NAME)
+      a%>%
+        mutate(SCIENTIFIC_NAME=factor(SCIENTIFIC_NAME,levels=SORT))%>%
+        group_by(YEAR,SCIENTIFIC_NAME)%>%
+        summarise(Tonnes=sum(LIVEWT.c,na.rm=T)/1000,
+                  TL=mean(TROPHIC_LEVEL,na.rm=T))%>%
+        ggplot(aes(YEAR,SCIENTIFIC_NAME,size=Tonnes,color=TL))+
+        geom_point()+
+        theme_PA(axs.t.siz=8)+ylab('Scientific name')
+      ggsave(paste0("Univariate/catch comp by year_",names(Data.list)[l],'.tiff'),
+             width = 6,height = 10.5,compression = "lzw")
+      b=a%>%
+        group_by(SCIENTIFIC_NAME)%>%
+        mutate(Min.year=min(YEAR))
+      write.csv(b%>%
+                  select(all_of(c('SCIENTIFIC_NAME','Min.year',traits_ecol,traits_morph)))%>%
+                  distinct(SCIENTIFIC_NAME,.keep_all = T)%>%arrange(Min.year),
+                paste0("catch comp by year_traits_",names(Data.list)[l],'.csv'),row.names = F)
+      
+  
+    
+    #Traits thru time (annual averages)  
+    fn.viol.box(d=OUT.base.case,byzone=FALSE,filcol='lightsalmon2',c(traits_ecol,traits_morph))
+    ggsave(paste0("Exploratory/bxplt_year_traits_",names(Data.list)[l],'.tiff'),
+           width = 10,height = 8,compression = "lzw")
+    
+    # Habitat         Rep
+    # reef-associated   1
+    # demersal          2
+    # benthopelagic     3
+    # pelagic-oceanic   4
+    # pelagic-neritic   5
+    
+    # Movement.scale Rep
+    #           0-100   1
+    #             500   2
+    #         100-500   3
+            
+  # Feeding.group                 Rep
+  # hunting macrofauna (predator)   1
+  
+  # Body.shape Rep
+  #    elongated   1
+  #    fusiform / normal   2
+  #  short and / or deep   3
+
+    
     #Look at annual averages  
     fn.viol.box(d=OUT.base.case,byzone=FALSE,filcol='lightsalmon2',resp.vars)
     ggsave(paste0("Exploratory/bxplt_year_",names(Data.list)[l],'.tiff'),
@@ -1173,7 +1252,7 @@ ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch
 setwd(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate"))
 Store.out=vector('list',length(Data.list))
 names(Store.out)=names(Data.list)
-tic()    #takes 6 mins
+tic()    #takes 16 mins
 for(l in 1:length(Store.out)) 
 {
   print(paste("Ecosystems indicators stats for -----------",names(Data.list)[l]))
@@ -1181,8 +1260,10 @@ for(l in 1:length(Store.out))
   IdvarS=IDVAR[which(IDVAR%in%names(Store.data.list[[l]]))]
   if(grepl("Observer",names(Store.data.list)[l])) Resp.vars=Resp.vars_observer
   if(grepl("Logbook",names(Store.data.list)[l]))  Resp.vars=Resp.vars_logbook
+  
   inters="YES"
   if(names(Store.data.list)[l]=="Logbook.north") inters="NO"   #not enough degrees of freedom
+  
   Store.out[[l]]=fn.apply.model(DaTA=Store.data.list[[l]],
                                 dat.nm=names(Store.data.list)[l],
                                 normalised="YES",
@@ -1218,6 +1299,7 @@ p.list=vector('list',length(Data.list))
 names(p.list)=names(Data.list)
 
   #Relative by data set
+ADD.smoother=FALSE
 for(l in 1:length(Store.out)) 
 {
   p.list[[l]]=fn.plot.preds(d=Store.out[[l]]%>%
@@ -1226,7 +1308,7 @@ for(l in 1:length(Store.out))
                                      Zone=ifelse(LONGITUDE1<116 & LATITUDE1>(-33),'West',
                                                  ifelse(LONGITUDE1<116 & LATITUDE1<=(-33),'Zone 1',
                                                         'Zone 2'))),
-                            add.smoother=TRUE,
+                            add.smoother=ADD.smoother,
                             YLAB='Relative value',
                             add.zone=FALSE)
   
@@ -1245,7 +1327,7 @@ do.call(rbind,Store.out)%>%
                             Data.set=='Logbook.north'~'NSF',
                             TRUE~Data.set))%>%
   ggplot(aes(yr,MeAn,color=Data.set))+
-  geom_smooth(method="auto", se=TRUE, fullrange=FALSE, level=0.95,alpha=0.35)+
+# geom_smooth(method="auto", se=TRUE, fullrange=FALSE, level=0.95,alpha=0.35)+
   geom_point(alpha=0.8,size=1.1)+
   geom_errorbar(aes(ymin = LowCI, ymax = UppCI))+
   geom_line(alpha=.6,linetype='dotted')+
@@ -1266,8 +1348,8 @@ for(l in 1:length(Store.out))
                          Zone=ifelse(LONGITUDE1<116 & LATITUDE1>(-33),'West',
                                      ifelse(LONGITUDE1<116 & LATITUDE1<=(-33),'Zone 1',
                                             'Zone 2'))),
-                add.smoother=TRUE,
-                YLAB='Index value',
+                add.smoother=ADD.smoother,
+                YLAB='Indicator value',
                 add.zone=FALSE)
   ggsave(paste0("Year prediction_",names(Store.out)[l],".tiff"),width = 6,height = 6,compression = "lzw")
 }
@@ -1283,13 +1365,13 @@ do.call(rbind,Store.out)%>%
                             Data.set=='Logbook.north'~'NSF',
                             TRUE~Data.set))%>%
   ggplot(aes(yr,MeAn,color=Data.set))+
-  geom_smooth(method="auto", se=TRUE, fullrange=FALSE, level=0.95,alpha=0.35)+
+# geom_smooth(method="auto", se=TRUE, fullrange=FALSE, level=0.95,alpha=0.35)+
   geom_point(alpha=0.8,size=1.1)+
   geom_errorbar(aes(ymin = LowCI, ymax = UppCI))+
   geom_line(alpha=.6,linetype='dotted')+
   facet_wrap(~Indicator,scales='free_y',ncol=2)+
   #scale_y_continuous(limits = c(0, NA))+
-  theme_PA(strx.siz=10)+ylab('Index value')+xlab('Financial year')+
+  theme_PA(strx.siz=10)+ylab('Indicator value')+xlab('Financial year')+
   theme(legend.position = 'top',
         legend.title=element_blank())
 ggsave(paste0("Year prediction_Combined.tiff"),width = 5,height = 8,compression = "lzw")
