@@ -40,6 +40,7 @@ library(Hmisc)
 library(tictoc)
 library(ggpubr)
 require(grid)
+library(ggpmisc)
 
 #Define working directory
 if(!exists('handl_OneDrive')) source('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias/Analyses/SOURCE_SCRIPTS/Git_other/handl_OneDrive.R')
@@ -167,6 +168,7 @@ names(Pred.lat)=names(Pred.long)=c('West','Zone 1','Zone 2')
 if(!is.null(protected.species))
 {
   Data.daily=Data.daily%>%filter(!SPECIES%in%protected.species)
+  Data.daily.LL=Data.daily.LL%>%filter(!SPECIES%in%protected.species)
   Data.daily.north=Data.daily.north%>%filter(!SPECIES%in%protected.species)
   Data.monthly=Data.monthly%>%filter(!SPECIES%in%protected.species)
   Data.monthly.north=Data.monthly.north%>%filter(!SPECIES%in%protected.species)
@@ -1615,7 +1617,72 @@ if(do.multivariate)
 }
 
 
-# 6. Display.catch.effort -----------------------------------------------------------------------
+
+# 6. Cluster analysis of Data.daily -----------------------------------------------------------------------
+#note: variable is catch as proportion
+Terms=c('SHEET_NO','BOAT','YEAR','NamE','MONTH','BLOCK','LATITUDE','LONGITUDE','zone')
+Modelled.var='proportion' # 'proportion'  'cpue'
+zonEs=sort(unique(Data.daily$zone))
+Clus=vector('list',length(zonEs))
+names(Clus)=zonEs
+p1.list=p2.list=Clus
+
+#Gillnet and Longline
+daily.list=list(GN=Data.daily,LL=Data.daily.LL)
+tic()
+for(l in 1:length(daily.list))
+{
+  for(z in 1:length(zonEs))
+  {
+    print(paste('-----Cluster analysis for Method----',names(daily.list)[l], 'zone------',zonEs[z]))
+    Clus[[z]]=Cluster.fn(d=daily.list[[l]]%>%
+                           filter(zone==zonEs[z])%>%
+                           mutate(NamE=SNAME)%>%
+                           group_by_at(Terms)%>%
+                           summarise(var=sum(LIVEWT.c,na.rm=T))%>%
+                           #summarise(var=sum(LIVEWT.c/EFFORT,na.rm=T))%>%
+                           ungroup(), 
+                         Terms=tolower(Terms),
+                         n.recent.years=5,
+                         percent.ktch.explained=0.80,
+                         var=Modelled.var)
+    
+    #display main species by cluster
+    p1.list[[z]]=Clus[[z]]$dt%>%
+      gather(key = species, value = var, -c(tolower(subset(Terms,!Terms=='NamE')),'cluster'))%>%
+      mutate(cluster=as.character(cluster))%>%
+      group_by(cluster,species)%>%
+      summarise(Mean=round(mean(var),2))%>%
+      mutate(species=ifelse(species=='Wobbegong','Wobbie',species))%>%
+      ggplot(aes(species,Mean,fill=cluster))+
+      geom_bar(stat='identity')+
+      geom_text(aes(label=Mean),size = 2, position=position_dodge(width=0.9), vjust=0.5)+
+      facet_wrap(~cluster,ncol=1)+ylab('Proportion')+xlab('')+
+      scale_x_discrete(labels = function(x) str_wrap(x, width = 10))+
+      theme(axis.text=element_text(size=8))
+    
+    #display boxplot species raw data by cluster
+    p2.list[[z]]=Clus[[z]]$dt%>%
+      gather(key = species, value = var, -c(tolower(subset(Terms,!Terms=='NamE')),'cluster'))%>%
+      mutate(cluster=as.character(cluster))%>%
+      ggplot(aes(species,var,fill=cluster))+
+      geom_violin()+coord_flip()+
+      geom_jitter(aes(color=cluster),height = 0, width = 0.1,alpha=0.2)+
+      xlab('')+ylab('Proportion')
+    
+    #combine all figures
+    ggarrange(plotlist=list(Clus[[z]]$num.clus,Clus[[z]]$cluster,p2.list[[z]],p1.list[[z]]),
+              common.legend = TRUE,ncol=2,nrow=2)
+    ggsave(handl_OneDrive(paste0("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Multivariate/Cluster_metier_",
+                                 names(daily.list)[l],'_',zonEs[z],".tiff")),
+           width = 7,height = 6,compression = "lzw")
+  }
+}
+toc()
+rm(daily.list)
+
+
+# 7. Display.catch.effort -----------------------------------------------------------------------
 if(display.catch.effort)
 {
   library(rgdal)

@@ -100,6 +100,12 @@ Data.monthly=Data.monthly%>%filter(METHOD=="GN" & Estuary=="NO" &
                     select(Same.return,FINYEAR,MONTH,VESSEL,METHOD,
                              BLOCKX,SPECIES,SNAME,YEAR.c,LIVEWT.c,LAT,LONG,TYPE.DATA,
                              zone,NETLEN.c)
+Data.daily.LL=Data.daily%>%
+  filter(METHOD=="LL" & Estuary=="NO" & 
+           HOOKS>=80 & LAT<=(-26))%>%
+  select(Same.return.SNo,FINYEAR,MONTH,VESSEL,METHOD,
+         BLOCKX,SPECIES,SNAME,YEAR.c,LIVEWT.c,LAT,LONG,TYPE.DATA,
+         zone,HOOKS)
 Data.daily=Data.daily%>%
               filter(METHOD=="GN" & Estuary=="NO" & 
                                      NETLEN>=100 & LAT<=(-26))%>%
@@ -159,9 +165,18 @@ Data.daily=Data.daily%>%
                    LATITUDE=LAT,
                    LONGITUDE=LONG)%>%
             mutate(SKIPPER=NA)
+Data.daily.LL=Data.daily.LL%>%
+            rename(SHEET_NO=Same.return.SNo,
+                   YEAR=FINYEAR,
+                   BLOCK=BLOCKX,
+                   BOAT=VESSEL,
+                   LATITUDE=LAT,
+                   LONGITUDE=LONG)%>%
+            mutate(SKIPPER=NA)
           
 
 #Remove nonsense catches (either too small or too large)
 Data.monthly=Data.monthly%>%filter(LIVEWT.c>1 & LIVEWT.c<25000)    
 Data.daily=Data.daily%>%filter(LIVEWT.c>.1 & LIVEWT.c<8000)  
+Data.daily.LL=Data.daily.LL%>%filter(LIVEWT.c>.1 & LIVEWT.c<8000)  
 

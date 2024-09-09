@@ -2885,7 +2885,62 @@ Catch.comp=function(ddd,All.sp,Display)
   return(p)
 }
 
+# Cluster analysis for metiers
+Cluster.fn=function(d,Terms,n.recent.years,percent.ktch.explained,var)
+{
+  #select years
+  all.yrs=sort(unique(d$YEAR))
+  an.yrs=all.yrs[(length(all.yrs)-4):length(all.yrs)]
+  
+  #set colnames to tolower
+  d=d%>%
+    filter(YEAR%in%an.yrs)%>%
+    rename_with(tolower)
+  
+  #find top species
+  top.sp=d%>%
+    group_by(name)%>%
+    summarise(Sum=sum(var))%>%
+    arrange(-Sum)%>%
+    ungroup()%>%
+    mutate(CumSum=cumsum(Sum),
+           Percent=CumSum/sum(Sum))%>%
+    filter(Percent<=percent.ktch.explained)%>%
+    pull(name)
+  d1=d%>%
+    data.frame%>%
+    mutate(name=ifelse(!name%in%top.sp,'other',name))%>%
+    group_by_at(Terms)%>%
+    summarise(var=sum(var,na.rm=T))%>%
+    ungroup()%>%
+    pivot_wider(names_from = name, values_from = var,values_fill=0)
+  
+  #wide table 
+  dt <- d1%>% dplyr::select(-subset(Terms,!Terms=='name'))
+  if(var=='proportion') dt <- dt%>%mutate(across(where(is.numeric))/rowSums(across(where(is.numeric)))) 
+  dt=dt%>% as.matrix() 
+  
+  #find number of clusters
+  b=fviz_nbclust(dt, clara, method = "silhouette",print.summary=T)
+  #print(b+theme_classic())
+  num.clus=as.numeric(as.character(b$data$clusters[match(max(b$data$y),b$data$y)]))
+  
+  
+  #apply cluster analysis
+  clara.res <- clara(dt, num.clus, samples = 50, pamLike = TRUE)
+  dd <- cbind(d1, cluster = clara.res$cluster)
 
+  #visualize clusters
+  p=fviz_cluster(clara.res, 
+               palette = rainbow(num.clus), # color palette
+               ellipse.type = "t", # Concentration ellipse
+               geom = "point", pointsize = 1,
+               ggtheme = theme_classic())
+  #print(p)
+  
+  return(list(num.clus=b+theme_classic(),cluster=p,d=dd,sp=c(top.sp,'other'),
+              dt=cbind(d1%>% dplyr::select(subset(Terms,!Terms=='name')),dt,cluster = clara.res$cluster)))
+}
 
 
 ####################################################################
