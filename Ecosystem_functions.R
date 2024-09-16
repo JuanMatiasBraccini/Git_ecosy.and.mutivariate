@@ -1034,21 +1034,31 @@ fn.calc.ecol.ind=function(DaTA,normalised,Drop.yrs,idvarS,resp.vars,TE=0.1,check
     if("Shannon"%in%resp.vars)
     {
       DATA.shots.diversity$Shannon = diversity(Dat.y, index = "shannon")
-      DATA.shots.diversity=subset(DATA.shots.diversity,!is.na(Shannon))
     }
       
     if("Simpson"%in%resp.vars)
     {
       DATA.shots.diversity$Simpson = diversity(Dat.y, index = "simpson")
-      DATA.shots.diversity=subset(DATA.shots.diversity,!is.na(Simpson))
-      DATA.shots.diversity=subset(DATA.shots.diversity,Simpson>0)
     }
     
     sp_names=colnames(Dat.y)
     
     if("Pielou"%in%resp.vars)
     {
-      DATA.shots.diversity$Pielou = Evenness(H = DATA.shots.diversity$Shannon, S = length(sp_names))
+      Number.of.species=Dat.y
+      Number.of.species[Number.of.species>0]=1
+      Number.of.species=rowSums(Number.of.species)
+      DATA.shots.diversity$Pielou = Evenness(H = DATA.shots.diversity$Shannon, S = Number.of.species)
+    }
+    
+    if("Shannon"%in%resp.vars) DATA.shots.diversity=subset(DATA.shots.diversity,!is.na(Shannon))
+    if("Simpson"%in%resp.vars)
+    {
+      DATA.shots.diversity=subset(DATA.shots.diversity,!is.na(Simpson))
+      DATA.shots.diversity=subset(DATA.shots.diversity,Simpson>0)
+    }
+    if("Pielou"%in%resp.vars)
+    {
       DATA.shots.diversity$Pielou[DATA.shots.diversity$Pielou == 0] = NA
       DATA.shots.diversity=subset(DATA.shots.diversity,!is.na(Pielou))
     }
