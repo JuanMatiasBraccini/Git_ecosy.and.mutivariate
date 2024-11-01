@@ -2895,6 +2895,48 @@ Catch.comp=function(ddd,All.sp,Display)
   return(p)
 }
 
+Catch.comp.stream=function(ddd,All.sp)
+{
+  Main=unique(ddd$Dataset)
+  dumi=ddd%>%
+    group_by(SCIENTIFIC_NAME)%>%
+    summarise(Prop=sum(Prop))%>%
+    ungroup()%>%
+    arrange(-Prop)%>%
+    mutate(Cumktch=cumsum(Prop),
+           Tot=sum(Prop),
+           Cumktch2=Cumktch/Tot,
+           SCIENTIFIC_NAME2=ifelse(Cumktch2<=0.95,SCIENTIFIC_NAME,'Other'))%>%
+    left_join(All.sp,by='SCIENTIFIC_NAME')
+  N.other=dumi%>%group_by(SCIENTIFIC_NAME2,Group)%>%tally()%>%filter(SCIENTIFIC_NAME2=='Other')
+  dumi=dumi%>%
+    mutate(SCIENTIFIC_NAME2=case_when(SCIENTIFIC_NAME2=='Other' & Group=='Elasmobranch'~paste0('Other elasmobranchs',' (',N.other%>%filter(Group=='Elasmobranch')%>%pull(n),' species)'),
+                                      SCIENTIFIC_NAME2=='Other' & Group=='Teleost'~paste0('Other teleosts',' (',N.other%>%filter(Group=='Teleost')%>%pull(n),' species)'),
+                                      TRUE~SCIENTIFIC_NAME2))%>%
+    dplyr::select(SCIENTIFIC_NAME,SCIENTIFIC_NAME2,Group)
+  
+  LVLs=dumi%>%arrange(Group,SCIENTIFIC_NAME2)%>%distinct(Group,SCIENTIFIC_NAME2)%>%pull(SCIENTIFIC_NAME2)
+  ddd=ddd%>%
+    left_join(dumi,by='SCIENTIFIC_NAME')%>%
+    mutate(color=ifelse(Group=='Teleost','dodgerblue4','firebrick3'))%>%
+    group_by(SCIENTIFIC_NAME2,YEAR,color,Group)%>%
+    summarise(Prop=sum(Prop,na.rm=T))%>%
+    ungroup()%>%
+    mutate(SCIENTIFIC_NAME2=factor(SCIENTIFIC_NAME2,levels=LVLs))
+  
+  p=ddd%>%
+    rename(Proportion=Prop)%>%
+    ggplot(aes(YEAR, Proportion, fill = SCIENTIFIC_NAME2,label = SCIENTIFIC_NAME2),color = 'black') +
+    geom_stream(color = "black", type = "mirror", n_grid = 3000, bw = .78)+
+    geom_stream_label(size = 4, type = "mirror", n_grid = 1000) +
+    ylab('')+xlab('Financial year')+
+    theme_PA(axs.t.siz=10,Ttl.siz=13)+
+    theme(legend.position = 'none',
+          plot.title.position = "plot")+ggtitle(Main)
+  return(p)
+}
+
+
 # Cluster analysis for metiers
 Cluster.fn=function(d,Terms,n.recent.years,percent.ktch.explained,var)
 {

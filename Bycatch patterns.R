@@ -41,6 +41,8 @@ library(tictoc)
 library(ggpubr)
 require(grid)
 library(ggpmisc)
+library(ggstream)
+library(ggtext)
 
 #Define working directory
 if(!exists('handl_OneDrive')) source('C:/Users/myb/OneDrive - Department of Primary Industries and Regional Development/Matias/Analyses/SOURCE_SCRIPTS/Git_other/handl_OneDrive.R')
@@ -853,6 +855,38 @@ if(use.NSF) hei.vec=c(1, 0.8,0.6)
 ggarrange(plotlist=p.list, common.legend = TRUE,ncol=1,heights = hei.vec)
 ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Species composition.tiff"),
        width = 6.5,height = 10,compression = "lzw")
+
+  #Streamgraph
+do.this=FALSE  #very time consuming
+if(do.this)
+{
+  p.list.stream=vector('list',length(Data.list))
+  for(l in 1:length(Data.list))
+  {
+    NM=names(Data.list)[l]
+    if(NM=="Logbook") NM="TDGDLF"
+    if(NM=="Logbook.north") NM="NSF"
+    
+    p.list.stream[[l]]=Catch.comp.stream(ddd=Data.list[[l]]%>%
+                                           filter(!is.na(EFFORT))%>%
+                                           mutate(INDIVIDUALS=INDIVIDUALS*EFFORT)%>%
+                                           group_by(SCIENTIFIC_NAME,YEAR)%>%
+                                           summarise(INDIVIDUALS=sum(INDIVIDUALS,na.rm=T))%>%
+                                           ungroup()%>%
+                                           group_by(YEAR)%>%
+                                           mutate(Tot=sum(INDIVIDUALS),
+                                                  Prop=INDIVIDUALS/Tot)%>%
+                                           ungroup()%>%
+                                           mutate(Dataset=NM),
+                                         All.sp=All.sp)
+  }
+  hei.vec=c(1, 0.8)
+  if(use.NSF) hei.vec=c(1, 0.8,0.6)
+  ggarrange(plotlist=p.list.stream, common.legend = TRUE,ncol=1,heights = hei.vec)
+  ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Species composition_streamgraph.tiff"),
+         width = 6.5,height = 10,compression = "lzw")
+}
+
 
   #data sets combined
 p.list=vector('list',length(Data.list))
