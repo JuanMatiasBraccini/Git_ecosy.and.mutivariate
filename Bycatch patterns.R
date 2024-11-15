@@ -1390,6 +1390,19 @@ for(l in 1:length(Store.out))
   ggsave(paste0("Year prediction_",names(Store.out)[l],".tiff"),width = 6,height = 6,compression = "lzw")
 }
 
+#Published observer
+fn.plot.preds(d=Store.out$Observer%>%
+                filter(!Indicator%in%c("Proportion of discards","Mean maximum length"))%>%
+                filter(Variable=='YEAR' & Relative=='NO')%>%
+                mutate(Value=as.numeric(Value),
+                       Zone=ifelse(LONGITUDE1<116 & LATITUDE1>(-33),'West',
+                                   ifelse(LONGITUDE1<116 & LATITUDE1<=(-33),'Zone 1',
+                                          'Zone 2'))),
+              add.smoother=ADD.smoother,
+              YLAB='Indicator value',
+              add.zone=FALSE)
+ggsave(paste0("Year prediction_Observer_published.tiff"),width = 6,height = 6,compression = "lzw")
+
 #Absolute data sets combined  
 do.call(rbind,Store.out)%>%
   filter(Variable=='YEAR'& Relative=='NO')%>%
@@ -1965,6 +1978,10 @@ if(display.catch.effort)
     theme_PA(leg.siz=12,axs.t.siz=10,axs.T.siz=14,str.siz=10)+
     theme(legend.title = element_blank())
   
+  CPUE=Catch.agg%>%
+    left_join(Eff.agg,by=c('Year','FisheryZone'))%>%
+    mutate(CPUE=Tons/Effort)
+ 
   p4=Eff.agg%>%
     ggplot(aes(Year,Effort,fill=FisheryZone))+
     geom_bar(stat='identity')+
@@ -1997,14 +2014,18 @@ if(display.catch.effort)
     xlab(expression('Longitude ('*~degree*E*')'))+
     scale_y_reverse()+xlim(Min.x,130)+
     ggtitle('TDGDLF')
+  p3.published=p3+
+    geom_line(data=CPUE,aes(Year,CPUE*10),linewidth=0.5) + #linetype='dotted'
+    scale_y_continuous(sec.axis = sec_axis(~./10, name="CPUE"))+
+    geom_point(data=CPUE,aes(Year,CPUE*10,fill=FisheryZone),shape=21,size=1,show.legend = FALSE)
   
   pp1=ggarrange(plotlist=list(p4+theme(axis.text = element_text(size = 9))+rremove("xlab"),
-                              p3+theme(axis.text = element_text(size = 9))+rremove("xlab")),
-                common.legend = TRUE,ncol=2)
+                              p3.published+theme(axis.text = element_text(size = 9))+rremove("xlab")),
+                common.legend = TRUE,ncol=2,widths = c(0.75,1))
   pp1=annotate_figure(pp1, bottom = textGrob("Financial year", gp = gpar(cex = 1.3)))
   
   
-  pp2=ggarrange(plotlist=list(p6,pp1),common.legend = TRUE,ncol=2,widths = c(0.5,1))
+  pp2=ggarrange(plotlist=list(p6,pp1),common.legend = TRUE,ncol=2,widths = c(0.4,1))
   
   ggarrange(plotlist=list(pp2,
                           p1+
@@ -2013,8 +2034,17 @@ if(display.catch.effort)
                              xlab(expression('Longitude ('*~degree*E*')'))),
                     ncol=1, heights = c(.7,1.3))
   
-  ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/Catch and effort_logbook.tiff"),
+  ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/Catch and effort_logbook_with CPUE.tiff"),
          width = 7,height = 8,compression = "lzw")
+  
+  CPUE%>%
+    ggplot(aes(Year,CPUE,color=FisheryZone))+
+    geom_line(linewidth=1.1) +
+    ylab('CPUE (tonnes/1000 km gn days)')+xlab('Financial year')+
+    theme_PA(leg.siz=12,axs.t.siz=10,axs.T.siz=14,str.siz=10)+
+    theme(legend.title = element_blank())
+  ggsave(handl_OneDrive("Analyses/Ecosystem indices and multivariate/Shark-bycatch/Outputs/Univariate/CPUE_logbook.tiff"),
+         width = 6,height = 6,compression = "lzw")
    
 }
 
